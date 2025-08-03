@@ -1,0 +1,12 @@
+node_modules/
+npm-debug.log
+.DS_Store
+temp/
+temp_intersect_thin/
+temp_repair/
+temp-bvh/
+three-bvh-csg/
+three-mesh-bvh/
+models/old/
+*.log
+.vscode/
