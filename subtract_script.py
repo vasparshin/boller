@@ -1,4 +1,4 @@
-# SCRIPT_VERSION: 1.0.104
+# SCRIPT_VERSION: 1.0.105
 import argparse
 import sys
 import trimesh
@@ -24,7 +24,7 @@ def heal_mesh(mesh_trimesh, operation_name=""):
 
 def convert_to_pyvista(mesh_trimesh):
     """Converts a Trimesh object to a PyVista PolyData object."""
-    if mesh_trimesh is None or not hasattr(mesh_trimesh, 'vertices') or not hasattr(mesh_trimesh, 'faces'):
+    if mesh_trimesh is None or not hasattr(mesh_trimesh, 'vertices') or not hasattr(mesh_trimesh, 'faces') or len(mesh_trimesh.faces) == 0:
         return None
     return pv.PolyData(mesh_trimesh.vertices, np.hstack((np.full((len(mesh_trimesh.faces), 1), 3), mesh_trimesh.faces)))
 
@@ -39,9 +39,9 @@ def boolean_operation_trimesh(model_mesh, logo_mesh, operation):
     print(f"[Trimesh Engine] Attempting {operation}...")
     try:
         if operation == 'intersection':
-            result = model_mesh.intersection(logo_mesh)
+            result = model_mesh.intersection(logo_mesh, engine='blender')
         elif operation == 'difference':
-            result = model_mesh.difference(logo_mesh)
+            result = model_mesh.difference(logo_mesh, engine='blender')
         else:
             return None
         if result is None or result.is_empty:
@@ -69,58 +69,51 @@ def boolean_operation(model_file_path, logo_file_path, output_file_path, operati
         model_mesh = heal_mesh(trimesh.load_mesh(model_file_path, force='mesh'), "initial_model")
         logo_mesh = heal_mesh(trimesh.load_mesh(logo_file_path, force='mesh'), "initial_logo")
 
+        # --- Geometric Perturbation ---
+        # Apply a tiny random translation and scale to the logo to avoid coplanar issues.
+        perturb_translation = (np.random.rand(3) - 0.5) * 0.01  # Max 0.005mm translation
+        perturb_scale = 1.0 + (np.random.rand() - 0.5) * 0.001 # Max 0.05% scale change
+        logo_mesh.apply_translation(perturb_translation)
+        logo_mesh.apply_scale(perturb_scale)
+        print(f"[Perturbation] Applied to logo: Translation={perturb_translation}, Scale={perturb_scale}")
+
         final_mesh = None
+        op_type = 'intersection' if operation in ['intersection', 'thin_intersection'] else 'difference'
         
-        if operation == 'thin_intersection':
-            print("--- Starting Thin Intersection ---")
-            # Stage 1
-            print("\n[Stage 1] Performing initial intersection...")
-            stage1_result_trimesh = boolean_operation_trimesh(model_mesh, logo_mesh, 'intersection')
-            if stage1_result_trimesh is None:
-                print("[Stage 1] Trimesh failed. Retrying with PyVista...")
-                model_pv = convert_to_pyvista(model_mesh)
-                logo_pv = convert_to_pyvista(logo_mesh)
-                stage1_result_pv = boolean_operation_pyvista(model_pv, logo_pv, 'intersection')
-                stage1_result_trimesh = convert_to_trimesh(stage1_result_pv)
+        # --- Primary Engine: Trimesh ---
+        final_mesh = boolean_operation_trimesh(model_mesh, logo_mesh, op_type)
 
-            if stage1_result_trimesh is None or stage1_result_trimesh.is_empty:
-                print("[Stage 1] Both engines failed. Aborting.", file=sys.stderr)
-                return False
-            
-            stage1_healed = heal_mesh(stage1_result_trimesh, "stage1_result")
-
-            # Stage 2
-            print("\n[Stage 2] Creating offset model...")
-            model_offset = model_mesh.copy()
-            model_offset.apply_transform(trimesh.transformations.translation_matrix([0, 0, thickness_delta]))
-            model_offset_healed = heal_mesh(model_offset, "stage2_offset_model")
-
-            # Stage 3
-            print("\n[Stage 3] Performing final intersection...")
-            final_mesh = boolean_operation_trimesh(stage1_healed, model_offset_healed, 'intersection')
-            if final_mesh is None:
-                print("[Stage 3] Trimesh failed. Retrying with PyVista...")
-                stage1_healed_pv = convert_to_pyvista(stage1_healed)
-                model_offset_healed_pv = convert_to_pyvista(model_offset_healed)
-                final_mesh_pv = boolean_operation_pyvista(stage1_healed_pv, model_offset_healed_pv, 'intersection')
-                final_mesh = convert_to_trimesh(final_mesh_pv)
-
-            if final_mesh is None or final_mesh.is_empty:
-                print("[Stage 3] Both engines failed. Aborting.", file=sys.stderr)
-                return False
-        else:
-            # Handle simple intersection and subtraction
-            op_type = 'intersection' if operation == 'intersection' else 'difference'
-            print(f"--- Starting Simple {op_type.capitalize()} ---")
-            final_mesh = boolean_operation_trimesh(model_mesh, logo_mesh, op_type)
-            if final_mesh is None:
-                print(f"[Trimesh Engine] Failed for {op_type}. Retrying with PyVista...")
-                model_pv = convert_to_pyvista(model_mesh)
-                logo_pv = convert_to_pyvista(logo_mesh)
+        # --- Fallback Engine: PyVista ---
+        if final_mesh is None:
+            print(f"[Fallback] Trimesh failed. Retrying with PyVista...")
+            model_pv = convert_to_pyvista(model_mesh)
+            logo_pv = convert_to_pyvista(logo_mesh)
+            if model_pv and logo_pv:
                 final_mesh_pv = boolean_operation_pyvista(model_pv, logo_pv, op_type)
                 final_mesh = convert_to_trimesh(final_mesh_pv)
+            else:
+                print("[Fallback] Could not convert meshes to PyVista format.", file=sys.stderr)
+        
+        if operation == 'thin_intersection' and (final_mesh is not None and not final_mesh.is_empty):
+             print("\n--- Continuing Thin Intersection (Post-Intersection) ---")
+             stage1_healed = heal_mesh(final_mesh, "stage1_result")
+             
+             model_offset = model_mesh.copy()
+             model_offset.apply_transform(trimesh.transformations.translation_matrix([0, 0, thickness_delta]))
+             model_offset_healed = heal_mesh(model_offset, "stage2_offset_model")
 
-        # Final validation and save
+             final_mesh = boolean_operation_trimesh(stage1_healed, model_offset_healed, 'intersection')
+             if final_mesh is None:
+                 print("[Thin Int Stage 3] Trimesh failed. Retrying with PyVista...")
+                 stage1_healed_pv = convert_to_pyvista(stage1_healed)
+                 model_offset_healed_pv = convert_to_pyvista(model_offset_healed)
+                 if stage1_healed_pv and model_offset_healed_pv:
+                    final_mesh_pv = boolean_operation_pyvista(stage1_healed_pv, model_offset_healed_pv, 'intersection')
+                    final_mesh = convert_to_trimesh(final_mesh_pv)
+                 else:
+                    print("[Thin Int Stage 3] Could not convert meshes for PyVista.", file=sys.stderr)
+
+
         if final_mesh is None or final_mesh.is_empty:
             print(f"Error: Final result for operation '{operation}' is empty after all attempts.", file=sys.stderr)
             return False
@@ -141,13 +134,6 @@ def boolean_operation(model_file_path, logo_file_path, output_file_path, operati
         return False
 
 if __name__ == "__main__":
-    try:
-        with open(__file__, 'r') as f:
-            first_line = f.readline().strip()
-            if "SCRIPT_VERSION" in first_line:
-                print(f"[Boolean Script] Running {first_line}")
-    except: pass
-        
     parser = argparse.ArgumentParser(description='Perform STL boolean operations using Trimesh and PyVista.')
     parser.add_argument('model_stl', help='Path to the input model STL file.')
     parser.add_argument('logo_stl', help='Path to the input logo STL file.')
