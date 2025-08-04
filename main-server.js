@@ -24,13 +24,7 @@ try {
 }
 
 // Add required module for running the Python script
-let child_process;
-try {
-    child_process = require('child_process');
-} catch (e) {
-    console.error('ERROR requiring child_process:', e);
-    process.exit(1);
-}
+const runPythonScript = require('./utils/runPythonScript');
 
 let app; 
 try { 
@@ -106,126 +100,34 @@ try {
 app.post('/api/repair-stl', async (req, res) => {
     console.log("Received request for /api/repair-stl");
     // Expecting { stlData: "<STL string>" }
-    const stlDataString = req.body.stlData; 
+    const stlDataString = req.body.stlData;
 
     if (!stlDataString) {
         console.error("No stlData found in request body");
         return res.status(400).json({ error: 'Missing stlData in request body' });
     }
-    
-    // Define temporary file paths
-    const tempDir = path.join(__dirname, 'temp_repair');
-    const inputFilename = `input_${Date.now()}.stl`;
-    const outputFilename = `output_${Date.now()}.stl`;
-    const inputPath = path.join(tempDir, inputFilename);
-    const outputPath = path.join(tempDir, outputFilename);
-    
     try {
-        // Ensure temp directory exists
-        if (!fs.existsSync(tempDir)){
-            console.log(`Creating temp directory: ${tempDir}`);
-            fs.mkdirSync(tempDir);
-        }
-        
-        // 1. Write the received text STL string to a temporary input file
-        console.log(`Writing input STL (UTF8) to: ${inputPath}`);
-        await fs.promises.writeFile(inputPath, stlDataString, 'utf8'); // Write as text
-        console.log(`Input STL written successfully.`);
-
-        // 2. Execute the Python repair script
-        const pythonExecutable = 'python'; // Or specify full path if needed
-        const scriptPath = path.join(__dirname, 'repair_script.py');
-        console.log(`Executing Python script: ${pythonExecutable} ${scriptPath} ${inputPath} ${outputPath}`);
-
-        // Correct arguments for the 'repair' operation
-        const pythonArgs = [scriptPath, 'repair', outputPath, '--input_file', inputPath];
-        console.log(`Corrected Python script execution: ${pythonExecutable} ${pythonArgs.join(' ')}`); // Log the corrected command
-        const pythonProcess = child_process.spawn(pythonExecutable, pythonArgs);
-
-        let scriptOutput = '';
-        let scriptError = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            const outputChunk = data.toString();
-            scriptOutput += outputChunk;
-            console.log(`[Python STDOUT] ${outputChunk.trim()}`);
+        const { result } = await runPythonScript({
+            scriptPath: path.join(__dirname, 'repair_script.py'),
+            tempDir: path.join(__dirname, 'temp_repair'),
+            inputData: { input: stlDataString },
+            buildArgs: ({ inputPaths, outputPath }) => [
+                'repair',
+                outputPath,
+                '--input_file',
+                inputPaths.input,
+            ],
+            logPrefix: 'Repair Script',
         });
 
-        pythonProcess.stderr.on('data', (data) => {
-            const errorChunk = data.toString();
-            scriptError += errorChunk;
-            console.error(`[Python STDERR] ${errorChunk.trim()}`);
-        });
-
-        pythonProcess.on('close', async (code) => {
-            console.log(`Python script exited with code ${code}`);
-
-            // Keep input file cleanup commented out to inspect the input file on error
-            /* 
-            try {
-                 console.log(`Cleaning up input file: ${inputPath}`);
-                 await fs.promises.unlink(inputPath); 
-            } catch (unlinkErr) {
-                 console.warn(`Could not delete temp input file ${inputPath}:`, unlinkErr);
-            }
-            */
-           console.warn(`Input file cleanup still disabled for debugging: ${inputPath}`); // Keep this warning active
-
-            if (code !== 0) {
-                console.error(`Python script failed. Error: ${scriptError}`);
-                // Attempt to clean up output file if it exists
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ 
-                     error: 'Python repair script failed.', 
-                     details: scriptError || 'Unknown Python error', 
-                     output: scriptOutput 
-                });
-            }
-
-            // 3. Read the repaired STL file content as TEXT
-            try {
-                console.log(`Reading repaired STL (UTF8) from: ${outputPath}`);
-                const repairedStlString = await fs.promises.readFile(outputPath, 'utf8'); // Read as text
-                console.log(`Repaired STL read successfully.`);
-                
-                // 4. Send the repaired text STL string back to the client
-                res.json({ repairedStlData: repairedStlString }); // Send text string
-                
-                 // 5. Clean up the output file after successful response
-                 try {
-                     console.log(`Cleaning up output file: ${outputPath}`);
-                     await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {
-                     console.warn(`Could not delete temp output file ${outputPath}:`, unlinkErr);
-                 }
-
-            } catch (readError) {
-                console.error(`Error reading repaired STL file ${outputPath}:`, readError);
-                return res.status(500).json({ error: 'Could not read repaired STL file.' });
-            }
-        });
-
-        pythonProcess.on('error', (spawnError) => {
-             console.error('Failed to start Python subprocess.', spawnError);
-             // Attempt to clean up input file
-             try {
-                 if (fs.existsSync(inputPath)) fs.promises.unlink(inputPath);
-             } catch (unlinkErr) {}
-             res.status(500).json({ error: 'Failed to execute Python repair script.', details: spawnError.message });
-        });
-
+        res.json({ repairedStlData: result });
     } catch (error) {
         console.error('Error in /api/repair-stl:', error);
-        // Attempt cleanup on general error
-        try {
-            if (fs.existsSync(inputPath)) await fs.promises.unlink(inputPath);
-            if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-        } catch (unlinkErr) {
-             console.warn("Error during cleanup:", unlinkErr);
-        }
-        res.status(500).json({ error: 'Server error during STL repair process.' });
+        return res.status(500).json({
+            error: 'Python repair script failed.',
+            details: error.details,
+            output: error.output,
+        });
     }
 });
 // --- END STL Repair Endpoint ---
@@ -233,7 +135,7 @@ app.post('/api/repair-stl', async (req, res) => {
 // --- NEW API Endpoint for STL Subtraction --- 
 app.post('/api/subtract-stl', async (req, res) => {
     console.log("Received request for /api/subtract-stl");
-    
+
     // Expecting { modelStlData: "<STL string>", logoStlData: "<STL string>" }
     const { modelStlData, logoStlData } = req.body;
 
@@ -241,139 +143,27 @@ app.post('/api/subtract-stl', async (req, res) => {
         console.error("Missing modelStlData or logoStlData in request body");
         return res.status(400).json({ error: 'Missing modelStlData or logoStlData in request body' });
     }
-    
-    // Define temporary file paths
-    const tempDir = path.join(__dirname, 'temp_subtract');
-    const modelFilename = `model_${Date.now()}.stl`;
-    const logoFilename = `logo_${Date.now()}.stl`;
-    const outputFilename = `output_${Date.now()}.stl`;
-    const modelPath = path.join(tempDir, modelFilename);
-    const logoPath = path.join(tempDir, logoFilename);
-    const outputPath = path.join(tempDir, outputFilename);
-    
-    let filesCreated = []; // Keep track of created files for cleanup
-
     try {
-        // Ensure temp directory exists
-        if (!fs.existsSync(tempDir)){
-            console.log(`Creating temp directory: ${tempDir}`);
-            fs.mkdirSync(tempDir);
-        }
-        
-        // 1. Write the received text STL strings to temporary input files
-        console.log(`Writing model STL (UTF8) to: ${modelPath}`);
-        await fs.promises.writeFile(modelPath, modelStlData, 'utf8');
-        filesCreated.push(modelPath);
-        console.log(`Model STL written successfully.`);
-        
-        console.log(`Writing logo STL (UTF8) to: ${logoPath}`);
-        await fs.promises.writeFile(logoPath, logoStlData, 'utf8');
-        filesCreated.push(logoPath);
-        console.log(`Logo STL written successfully.`);
-
-        // 2. Execute the Python subtraction script
-        const pythonExecutable = 'python'; // Or specify full path
-        const scriptPath = path.join(__dirname, 'subtract_script.py');
-        const args = [
-            scriptPath,
-            'subtract',          // operation
-            outputPath,          // output_file
-            '--model_file', modelPath,
-            '--tool_file', logoPath
-        ];
-        console.log(`Executing Python script: ${pythonExecutable} ${args.join(' ')}`);
-
-        const pythonProcess = child_process.spawn(pythonExecutable, args);
-
-        let scriptOutput = '';
-        let scriptError = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            const outputChunk = data.toString();
-            scriptOutput += outputChunk;
-            console.log(`[Python STDOUT] ${outputChunk.trim()}`);
+        const { result } = await runPythonScript({
+            scriptPath: path.join(__dirname, 'subtract_script.py'),
+            tempDir: path.join(__dirname, 'temp_subtract'),
+            inputData: { model: modelStlData, logo: logoStlData },
+            buildArgs: ({ inputPaths, outputPath }) => [
+                'subtract',
+                outputPath,
+                '--model_file', inputPaths.model,
+                '--tool_file', inputPaths.logo,
+            ],
+            logPrefix: 'Subtract Script',
         });
-
-        pythonProcess.stderr.on('data', (data) => {
-            const errorChunk = data.toString();
-            scriptError += errorChunk;
-            console.error(`[Python STDERR] ${errorChunk.trim()}`);
-        });
-
-        pythonProcess.on('close', async (code) => {
-            console.log(`Python script exited with code ${code}`);
-
-            // Clean up input files regardless of outcome
-            for (const filePath of filesCreated) {
-                if (filePath !== outputPath) { // Don't delete output yet
-                    try { await fs.promises.unlink(filePath); } catch (e) { console.warn(`Could not delete temp file ${filePath}:`, e); }
-                }
-            }
-
-            if (code !== 0) {
-                console.error(`Python script failed. Error: ${scriptError}`);
-                try { if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath); } catch (e) {} // Clean up potential failed output
-                return res.status(500).json({ 
-                     error: 'Python subtraction script failed.', 
-                     details: scriptError || 'Unknown Python error', 
-                     output: scriptOutput 
-                });
-            }
-
-            // 3. Read the resulting STL file content as TEXT
-            try {
-                console.log(`Reading result STL (UTF8) from: ${outputPath}`);
-                const resultStlString = await fs.promises.readFile(outputPath, 'utf8');
-                console.log(`Result STL read successfully.`);
-                
-                // 4. Send the result text STL string back to the client
-                res.json({ subtractedStlData: resultStlString });
-                
-                 // 5. Clean up the output file after successful response
-                 try {
-                     await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {
-                     console.warn(`Could not delete temp output file ${outputPath}:`, unlinkErr);
-                 }
-
-            } catch (readError) {
-                console.error(`Error reading result STL file ${outputPath}:`, readError);
-                return res.status(500).json({ error: 'Could not read result STL file from Python script.' });
-            }
-        });
-
-        pythonProcess.on('error', (spawnError) => {
-             console.error('Failed to start Python subprocess.', spawnError);
-             // Attempt cleanup on spawn error (use synchronous unlink here)
-             for (const filePath of filesCreated) {
-                 try {
-                      if (fs.existsSync(filePath)) {
-                           console.warn(`Sync cleanup on spawn error: ${filePath}`);
-                           fs.unlinkSync(filePath);
-                      }
-                 } catch (e) { console.warn(`Could not delete temp file ${filePath} synchronously:`, e); }
-             }
-             res.status(500).json({ error: 'Failed to execute Python subtraction script.', details: spawnError.message });
-        });
-
+        res.json({ subtractedStlData: result });
     } catch (error) {
         console.error('Error in /api/subtract-stl:', error);
-        // Attempt cleanup on general error (use synchronous unlink here)
-        for (const filePath of filesCreated) {
-             try {
-                  if (fs.existsSync(filePath)) {
-                       console.warn(`Sync cleanup on general error: ${filePath}`);
-                       fs.unlinkSync(filePath);
-                  }
-             } catch (e) { console.warn(`Could not delete temp file ${filePath} synchronously:`, e); }
-        }
-        if (fs.existsSync(outputPath)) {
-             try {
-                  console.warn(`Sync cleanup on general error (output): ${outputPath}`);
-                  fs.unlinkSync(outputPath);
-             } catch (e) { console.warn(`Could not delete temp output file ${outputPath} synchronously:`, e); }
-        }
-        res.status(500).json({ error: 'Server error during STL subtraction process.' });
+        return res.status(500).json({
+            error: 'Python subtraction script failed.',
+            details: error.details,
+            output: error.output,
+        });
     }
 });
 // --- END STL Subtraction Endpoint ---
@@ -389,155 +179,28 @@ app.post('/api/subtract-stl-scripted', async (req, res) => {
         console.error("Missing modelStlData or logoStlData in request body for subtraction");
         return res.status(400).json({ error: 'Missing modelStlData or logoStlData in request body' });
     }
-    
-    // Define temporary file paths for subtraction
-    const tempDir = path.join(__dirname, 'temp_subtract'); // Use a separate temp dir
-    const modelInputFilename = `model_in_${Date.now()}.stl`;
-    const logoInputFilename = `logo_in_${Date.now()}.stl`;
-    const outputFilename = `subtract_out_${Date.now()}.stl`;
-    
-    const modelInputPath = path.join(tempDir, modelInputFilename);
-    const logoInputPath = path.join(tempDir, logoInputFilename);
-    const outputPath = path.join(tempDir, outputFilename);
-    
     try {
-        // Ensure temp directory exists
-        if (!fs.existsSync(tempDir)){
-            console.log(`Creating temp directory: ${tempDir}`);
-            fs.mkdirSync(tempDir);
-        }
-        
-        // 1. Write the received STL strings to temporary input files (UTF8/ASCII)
-        console.log(`Writing model STL to: ${modelInputPath}`);
-        await fs.promises.writeFile(modelInputPath, modelStlData, 'utf8'); 
-        console.log(`Writing logo STL to: ${logoInputPath}`);
-        await fs.promises.writeFile(logoInputPath, logoStlData, 'utf8'); 
-        console.log(`Input STLs written successfully.`);
-
-        // 2. Execute the Python subtraction script
-        const pythonExecutable = 'python'; // Or specify full path
-        const scriptPath = path.join(__dirname, 'subtract_script.py');
-        
-        // --- Add Python Path/Version Logging ---
-        try {
-            console.log("Checking Python executable used by Node.js...");
-            const pyVersion = child_process.execSync(`${pythonExecutable} -V`).toString().trim();
-            const pyPath = child_process.execSync(`${pythonExecutable} -c "import sys; print(sys.executable)"`).toString().trim();
-            console.log(`Node.js will use Python Version: ${pyVersion}`);
-            console.log(`Node.js will use Python Path: ${pyPath}`);
-        } catch (pyCheckError) {
-            console.error(`Failed to check Python version/path using '${pythonExecutable}':`, pyCheckError.message);
-            console.error("Ensure Python is installed and accessible in the system PATH, or specify the full path in 'pythonExecutable'.");
-            // Don't proceed if we can't even find Python
-            return res.status(500).json({ error: 'Python executable not found or failed to execute.', details: pyCheckError.message });
-        }
-        // --- End Logging ---
-        
-        // Arguments: script_path model_input_path logo_input_path output_path
-        const pythonArgs = [scriptPath, modelInputPath, logoInputPath, outputPath];
-        console.log(`Executing Python subtraction script: ${pythonExecutable} ${pythonArgs.join(' ')}`);
-        
-        const pythonProcess = child_process.spawn(pythonExecutable, pythonArgs);
-
-        let scriptOutput = '';
-        let scriptError = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            const outputChunk = data.toString();
-            scriptOutput += outputChunk;
-            console.log(`[Subtract Script STDOUT] ${outputChunk.trim()}`);
+        const { result } = await runPythonScript({
+            scriptPath: path.join(__dirname, 'subtract_script.py'),
+            tempDir: path.join(__dirname, 'temp_subtract'),
+            inputData: { model: modelStlData, logo: logoStlData },
+            buildArgs: ({ inputPaths, outputPath }) => [
+                inputPaths.model,
+                inputPaths.logo,
+                outputPath,
+            ],
+            logPrefix: 'Subtract Script',
         });
-
-        pythonProcess.stderr.on('data', (data) => {
-            const errorChunk = data.toString();
-            scriptError += errorChunk;
-            console.error(`[Subtract Script STDERR] ${errorChunk.trim()}`);
-        });
-
-        pythonProcess.on('close', async (code) => {
-            console.log(`Python subtraction script exited with code ${code}`);
-
-            // --- Cleanup Input Files ---
-            // Always try to delete input files regardless of outcome
-            // Keep commented out for debugging if needed
-            /*
-            try {
-                console.log(`Cleaning up input file: ${modelInputPath}`);
-                await fs.promises.unlink(modelInputPath); 
-                console.log(`Cleaning up input file: ${logoInputPath}`);
-                await fs.promises.unlink(logoInputPath); 
-            } catch (unlinkErr) {
-                console.warn(`Could not delete temp input files:`, unlinkErr);
-            }
-            */
-           console.warn(`Input file cleanup disabled for debugging: ${modelInputPath}, ${logoInputPath}`);
-
-
-            if (code !== 0) {
-                // Log the FULL error message
-                console.error(`Python subtraction script failed. Full STDERR: ${scriptError}`); 
-                // Attempt to clean up output file if it exists on error
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ 
-                     error: 'Python subtraction script failed.', 
-                     // Send the full error back in details for easier debugging client-side too
-                     details: scriptError || 'Unknown Python error', 
-                     output: scriptOutput 
-                });
-            }
-
-            // 3. Read the result STL file content as TEXT
-            try {
-                console.log(`Reading subtracted STL (UTF8) from: ${outputPath}`);
-                const subtractedStlString = await fs.promises.readFile(outputPath, 'utf8'); 
-                console.log(`Subtracted STL read successfully.`);
-                
-                // 4. Send the result text STL string back to the client
-                // IMPORTANT: Use the same JSON key as before ('subtractedStlData')
-                res.json({ subtractedStlData: subtractedStlString }); 
-                
-                 // 5. Clean up the output file after successful response
-                 try {
-                     console.log(`Cleaning up output file: ${outputPath}`);
-                     await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {
-                     console.warn(`Could not delete temp output file ${outputPath}:`, unlinkErr);
-                 }
-
-            } catch (readError) {
-                console.error(`Error reading subtracted STL file ${outputPath}:`, readError);
-                 // Clean up output file on read error too
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ error: 'Could not read subtracted STL file.' });
-            }
-        });
-
-        pythonProcess.on('error', (spawnError) => {
-             console.error('Failed to start Python subtraction subprocess.', spawnError);
-             // Attempt to clean up input files
-             try {
-                 if (fs.existsSync(modelInputPath)) fs.promises.unlink(modelInputPath);
-                 if (fs.existsSync(logoInputPath)) fs.promises.unlink(logoInputPath);
-             } catch (unlinkErr) {}
-             res.status(500).json({ error: 'Failed to execute Python subtraction script.', details: spawnError.message });
-        });
-
+        res.json({ subtractedStlData: result });
     } catch (error) {
         console.error('Error in /api/subtract-stl-scripted:', error);
-        // Attempt cleanup on general error
-        try {
-            if (fs.existsSync(modelInputPath)) await fs.promises.unlink(modelInputPath);
-            if (fs.existsSync(logoInputPath)) await fs.promises.unlink(logoInputPath);
-            if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-        } catch (unlinkErr) {
-             console.warn("Error during cleanup:", unlinkErr);
-        }
-        res.status(500).json({ error: 'Server error during STL subtraction process.' });
+        return res.status(500).json({
+            error: 'Python subtraction script failed.',
+            details: error.details,
+            output: error.output,
+        });
     }
+    
 });
 // --- END Scripted Subtraction Endpoint ---
 
@@ -552,154 +215,30 @@ app.post('/api/intersect-stl-scripted', async (req, res) => {
         console.error("Missing modelStlData or logoStlData in request body for intersection");
         return res.status(400).json({ error: 'Missing modelStlData or logoStlData in request body' });
     }
-    
-    // Define temporary file paths for intersection
-    const tempDir = path.join(__dirname, 'temp_intersect'); // Use a separate temp dir for intersection
-    const modelInputFilename = `model_in_${Date.now()}.stl`;
-    const logoInputFilename = `logo_in_${Date.now()}.stl`;
-    const outputFilename = `intersect_out_${Date.now()}.stl`;
-    
-    const modelInputPath = path.join(tempDir, modelInputFilename);
-    const logoInputPath = path.join(tempDir, logoInputFilename);
-    const outputPath = path.join(tempDir, outputFilename);
-    
     try {
-        // Ensure temp directory exists
-        if (!fs.existsSync(tempDir)){
-            console.log(`Creating temp directory: ${tempDir}`);
-            fs.mkdirSync(tempDir);
-        }
-        
-        // 1. Write the received STL strings to temporary input files (UTF8/ASCII)
-        console.log(`Writing model STL to: ${modelInputPath}`);
-        await fs.promises.writeFile(modelInputPath, modelStlData, 'utf8'); 
-        console.log(`Writing logo STL to: ${logoInputPath}`);
-        await fs.promises.writeFile(logoInputPath, logoStlData, 'utf8'); 
-        console.log(`Input STLs written successfully.`);
-
-        // 2. Execute the Python intersection script with --operation intersection
-        const pythonExecutable = 'python'; // Or specify full path
-        const scriptPath = path.join(__dirname, 'subtract_script.py'); // Use the same script but with intersection operation
-        
-        // --- Add Python Path/Version Logging ---
-        try {
-            console.log("Checking Python executable used by Node.js...");
-            const pyVersion = child_process.execSync(`${pythonExecutable} -V`).toString().trim();
-            const pyPath = child_process.execSync(`${pythonExecutable} -c "import sys; print(sys.executable)"`).toString().trim();
-            console.log(`Node.js will use Python Version: ${pyVersion}`);
-            console.log(`Node.js will use Python Path: ${pyPath}`);
-        } catch (pyCheckError) {
-            console.error(`Failed to check Python version/path using '${pythonExecutable}':`, pyCheckError.message);
-            console.error("Ensure Python is installed and accessible in the system PATH, or specify the full path in 'pythonExecutable'.");
-            // Don't proceed if we can't even find Python
-            return res.status(500).json({ error: 'Python executable not found or failed to execute.', details: pyCheckError.message });
-        }
-        // --- End Logging ---
-        
-        // Arguments: script_path model_input_path logo_input_path output_path --operation intersection
-        const pythonArgs = [scriptPath, modelInputPath, logoInputPath, outputPath, '--operation', 'intersection'];
-        console.log(`Executing Python intersection script: ${pythonExecutable} ${pythonArgs.join(' ')}`);
-        
-        const pythonProcess = child_process.spawn(pythonExecutable, pythonArgs);
-
-        let scriptOutput = '';
-        let scriptError = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            const outputChunk = data.toString();
-            scriptOutput += outputChunk;
-            console.log(`[Intersect Script STDOUT] ${outputChunk.trim()}`);
+        const { result } = await runPythonScript({
+            scriptPath: path.join(__dirname, 'subtract_script.py'),
+            tempDir: path.join(__dirname, 'temp_intersect'),
+            inputData: { model: modelStlData, logo: logoStlData },
+            buildArgs: ({ inputPaths, outputPath }) => [
+                inputPaths.model,
+                inputPaths.logo,
+                outputPath,
+                '--operation',
+                'intersection',
+            ],
+            logPrefix: 'Intersect Script',
         });
-
-        pythonProcess.stderr.on('data', (data) => {
-            const errorChunk = data.toString();
-            scriptError += errorChunk;
-            console.error(`[Intersect Script STDERR] ${errorChunk.trim()}`);
-        });
-
-        pythonProcess.on('close', async (code) => {
-            console.log(`Python intersection script exited with code ${code}`);
-
-            // --- Cleanup Input Files ---
-            // Always try to delete input files regardless of outcome
-            // Keep commented out for debugging if needed
-            /*
-            try {
-                console.log(`Cleaning up input file: ${modelInputPath}`);
-                await fs.promises.unlink(modelInputPath); 
-                console.log(`Cleaning up input file: ${logoInputPath}`);
-                await fs.promises.unlink(logoInputPath); 
-            } catch (unlinkErr) {
-                console.warn(`Could not delete temp input files:`, unlinkErr);
-            }
-            */
-           console.warn(`Input file cleanup disabled for debugging: ${modelInputPath}, ${logoInputPath}`);
-
-            if (code !== 0) {
-                // Log the FULL error message
-                console.error(`Python intersection script failed. Full STDERR: ${scriptError}`); 
-                // Attempt to clean up output file if it exists on error
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ 
-                     error: 'Python intersection script failed.', 
-                     // Send the full error back in details for easier debugging client-side too
-                     details: scriptError || 'Unknown Python error', 
-                     output: scriptOutput 
-                });
-            }
-
-            // 3. Read the result STL file content as TEXT
-            try {
-                console.log(`Reading intersected STL (UTF8) from: ${outputPath}`);
-                const intersectedStlString = await fs.promises.readFile(outputPath, 'utf8'); 
-                console.log(`Intersected STL read successfully.`);
-                
-                // 4. Send the result text STL string back to the client
-                // Use a consistent JSON key for intersection results
-                res.json({ intersectedStlData: intersectedStlString }); 
-                
-                 // 5. Clean up the output file after successful response
-                 try {
-                     console.log(`Cleaning up output file: ${outputPath}`);
-                     await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {
-                     console.warn(`Could not delete temp output file ${outputPath}:`, unlinkErr);
-                 }
-
-            } catch (readError) {
-                console.error(`Error reading intersected STL file ${outputPath}:`, readError);
-                 // Clean up output file on read error too
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ error: 'Could not read intersected STL file.' });
-            }
-        });
-
-        pythonProcess.on('error', (spawnError) => {
-             console.error('Failed to start Python intersection subprocess.', spawnError);
-             // Attempt to clean up input files
-             try {
-                 if (fs.existsSync(modelInputPath)) fs.promises.unlink(modelInputPath);
-                 if (fs.existsSync(logoInputPath)) fs.promises.unlink(logoInputPath);
-             } catch (unlinkErr) {}
-             res.status(500).json({ error: 'Failed to execute Python intersection script.', details: spawnError.message });
-        });
-
+        res.json({ intersectedStlData: result });
     } catch (error) {
         console.error('Error in /api/intersect-stl-scripted:', error);
-        // Attempt cleanup on general error
-        try {
-            if (fs.existsSync(modelInputPath)) await fs.promises.unlink(modelInputPath);
-            if (fs.existsSync(logoInputPath)) await fs.promises.unlink(logoInputPath);
-            if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-        } catch (unlinkErr) {
-             console.warn("Error during cleanup:", unlinkErr);
-        }
-        res.status(500).json({ error: 'Server error during STL intersection process.' });
+        return res.status(500).json({
+            error: 'Python intersection script failed.',
+            details: error.details,
+            output: error.output,
+        });
     }
+    
 });
 // --- END Scripted Intersection Endpoint ---
 
@@ -714,155 +253,33 @@ app.post('/api/intersect-thin-stl-scripted', async (req, res) => {
         console.error("Missing modelStlData or logoStlData in request body for thin intersection");
         return res.status(400).json({ error: 'Missing modelStlData or logoStlData in request body' });
     }
-    
-    // Define temporary file paths for thin intersection
-    const tempDir = path.join(__dirname, 'temp_intersect_thin'); // Use a separate temp dir for thin intersection
-    const modelInputFilename = `model_in_${Date.now()}.stl`;
-    const logoInputFilename = `logo_in_${Date.now()}.stl`;
-    const outputFilename = `intersect_thin_out_${Date.now()}.stl`;
-    
-    const modelInputPath = path.join(tempDir, modelInputFilename);
-    const logoInputPath = path.join(tempDir, logoInputFilename);
-    const outputPath = path.join(tempDir, outputFilename);
-    
     try {
-        // Ensure temp directory exists
-        if (!fs.existsSync(tempDir)){
-            console.log(`Creating temp directory: ${tempDir}`);
-            fs.mkdirSync(tempDir);
-        }
-        
-        // 1. Write the received STL strings to temporary input files (UTF8/ASCII)
-        console.log(`Writing model STL to: ${modelInputPath}`);
-        await fs.promises.writeFile(modelInputPath, modelStlData, 'utf8'); 
-        console.log(`Writing logo STL to: ${logoInputPath}`);
-        await fs.promises.writeFile(logoInputPath, logoStlData, 'utf8'); 
-        console.log(`Input STLs written successfully.`);
-
-        // 2. Execute the Python thin intersection script with --operation thin_intersection
-        const pythonExecutable = 'python'; // Or specify full path
-        const scriptPath = path.join(__dirname, 'subtract_script.py'); // Use the same script but with thin_intersection operation
-        
-        // --- Add Python Path/Version Logging ---
-        try {
-            console.log("Checking Python executable used by Node.js...");
-            const pyVersion = child_process.execSync(`${pythonExecutable} -V`).toString().trim();
-            const pyPath = child_process.execSync(`${pythonExecutable} -c "import sys; print(sys.executable)"`).toString().trim();
-            console.log(`Node.js will use Python Version: ${pyVersion}`);
-            console.log(`Node.js will use Python Path: ${pyPath}`);
-        } catch (pyCheckError) {
-            console.error(`Failed to check Python version/path using '${pythonExecutable}':`, pyCheckError.message);
-            console.error("Ensure Python is installed and accessible in the system PATH, or specify the full path in 'pythonExecutable'.");
-            // Don't proceed if we can't even find Python
-            return res.status(500).json({ error: 'Python executable not found or failed to execute.', details: pyCheckError.message });
-        }
-        // --- End Logging ---
-        
-        // Arguments: script_path model_input_path logo_input_path output_path --operation thin_intersection --thickness-delta value
-        const pythonArgs = [scriptPath, modelInputPath, logoInputPath, outputPath, '--operation', 'thin_intersection', '--thickness-delta', thicknessDelta.toString()];
-        console.log(`Executing Python thin intersection script: ${pythonExecutable} ${pythonArgs.join(' ')}`);
-        
-        const pythonProcess = child_process.spawn(pythonExecutable, pythonArgs);
-
-        let scriptOutput = '';
-        let scriptError = '';
-
-        pythonProcess.stdout.on('data', (data) => {
-            const outputChunk = data.toString();
-            scriptOutput += outputChunk;
-            console.log(`[Thin Intersect Script STDOUT] ${outputChunk.trim()}`);
+        const { result } = await runPythonScript({
+            scriptPath: path.join(__dirname, 'subtract_script.py'),
+            tempDir: path.join(__dirname, 'temp_intersect_thin'),
+            inputData: { model: modelStlData, logo: logoStlData },
+            buildArgs: ({ inputPaths, outputPath }) => [
+                inputPaths.model,
+                inputPaths.logo,
+                outputPath,
+                '--operation',
+                'thin_intersection',
+                '--thickness-delta',
+                thicknessDelta.toString(),
+            ],
+            logPrefix: 'Thin Intersect Script',
         });
-
-        pythonProcess.stderr.on('data', (data) => {
-            const errorChunk = data.toString();
-            scriptError += errorChunk;
-            console.error(`[Thin Intersect Script STDERR] ${errorChunk.trim()}`);
-        });
-
-        pythonProcess.on('close', async (code) => {
-            console.log(`Python thin intersection script exited with code ${code}`);
-
-            // --- Cleanup Input Files ---
-            // Always try to delete input files regardless of outcome
-            // Keep commented out for debugging if needed
-            /*
-            try {
-                console.log(`Cleaning up input file: ${modelInputPath}`);
-                await fs.promises.unlink(modelInputPath); 
-                console.log(`Cleaning up input file: ${logoInputPath}`);
-                await fs.promises.unlink(logoInputPath); 
-            } catch (unlinkErr) {
-                console.warn(`Could not delete temp input files:`, unlinkErr);
-            }
-            */
-           console.warn(`Input file cleanup disabled for debugging: ${modelInputPath}, ${logoInputPath}`);
-
-            if (code !== 0) {
-                // Log the FULL error message
-                console.error(`Python thin intersection script failed. Full STDERR: ${scriptError}`); 
-                // Attempt to clean up output file if it exists on error
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ 
-                     error: 'Python thin intersection script failed.', 
-                     // Send the full error back in details for easier debugging client-side too
-                     details: scriptError || 'Unknown Python error', 
-                     output: scriptOutput 
-                });
-            }
-
-            // 3. Read the result STL file content as TEXT
-            try {
-                console.log(`Reading thin intersected STL (UTF8) from: ${outputPath}`);
-                const thinIntersectedStlString = await fs.promises.readFile(outputPath, 'utf8'); 
-                console.log(`Thin intersected STL read successfully.`);
-                
-                // 4. Send the result text STL string back to the client
-                // Use a consistent JSON key for thin intersection results
-                res.json({ thinIntersectedStlData: thinIntersectedStlString }); 
-                
-                 // 5. Clean up the output file after successful response
-                 try {
-                     console.log(`Cleaning up output file: ${outputPath}`);
-                     await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {
-                     console.warn(`Could not delete temp output file ${outputPath}:`, unlinkErr);
-                 }
-
-            } catch (readError) {
-                console.error(`Error reading thin intersected STL file ${outputPath}:`, readError);
-                 // Clean up output file on read error too
-                 try {
-                     if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-                 } catch (unlinkErr) {}
-                return res.status(500).json({ error: 'Could not read thin intersected STL file.' });
-            }
-        });
-
-        pythonProcess.on('error', (spawnError) => {
-             console.error('Failed to start Python thin intersection subprocess.', spawnError);
-             // Attempt to clean up input files
-             try {
-                 if (fs.existsSync(modelInputPath)) fs.promises.unlink(modelInputPath);
-                 if (fs.existsSync(logoInputPath)) fs.promises.unlink(logoInputPath);
-             } catch (unlinkErr) {}
-             res.status(500).json({ error: 'Failed to execute Python thin intersection script.', details: spawnError.message });
-        });
-
+        res.json({ thinIntersectedStlData: result });
     } catch (error) {
         console.error('Error in /api/intersect-thin-stl-scripted:', error);
-        // Attempt cleanup on general error
-        try {
-            if (fs.existsSync(modelInputPath)) await fs.promises.unlink(modelInputPath);
-            if (fs.existsSync(logoInputPath)) await fs.promises.unlink(logoInputPath);
-            if (fs.existsSync(outputPath)) await fs.promises.unlink(outputPath);
-        } catch (unlinkErr) {
-             console.warn("Error during cleanup:", unlinkErr);
-        }
-        res.status(500).json({ error: 'Server error during STL thin intersection process.' });
+        return res.status(500).json({
+            error: 'Python thin intersection script failed.',
+            details: error.details,
+            output: error.output,
+        });
     }
 });
+    
 // --- END Scripted Thin Intersection Endpoint ---
 
 // Add logging functionality
