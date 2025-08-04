@@ -26,6 +26,16 @@ try {
 // Add required module for running the Python script
 const runPythonScript = require('./utils/runPythonScript');
 
+// Pre-resolve Python script paths and temp directories used by API endpoints
+const repairScriptPath = path.join(__dirname, 'repair_script.py');
+const subtractScriptPath = path.join(__dirname, 'subtract_script.py');
+const tempDirs = {
+    repair: path.join(__dirname, 'temp_repair'),
+    subtract: path.join(__dirname, 'temp_subtract'),
+    intersect: path.join(__dirname, 'temp_intersect'),
+    intersectThin: path.join(__dirname, 'temp_intersect_thin'),
+};
+
 let app; 
 try { 
     app = express(); 
@@ -108,8 +118,8 @@ app.post('/api/repair-stl', async (req, res) => {
     }
     try {
         const { result } = await runPythonScript({
-            scriptPath: path.join(__dirname, 'repair_script.py'),
-            tempDir: path.join(__dirname, 'temp_repair'),
+            scriptPath: repairScriptPath,
+            tempDir: tempDirs.repair,
             inputData: { input: stlDataString },
             buildArgs: ({ inputPaths, outputPath }) => [
                 'repair',
@@ -145,8 +155,8 @@ app.post('/api/subtract-stl', async (req, res) => {
     }
     try {
         const { result } = await runPythonScript({
-            scriptPath: path.join(__dirname, 'subtract_script.py'),
-            tempDir: path.join(__dirname, 'temp_subtract'),
+            scriptPath: subtractScriptPath,
+            tempDir: tempDirs.subtract,
             inputData: { model: modelStlData, logo: logoStlData },
             buildArgs: ({ inputPaths, outputPath }) => [
                 'subtract',
@@ -181,8 +191,8 @@ app.post('/api/subtract-stl-scripted', async (req, res) => {
     }
     try {
         const { result } = await runPythonScript({
-            scriptPath: path.join(__dirname, 'subtract_script.py'),
-            tempDir: path.join(__dirname, 'temp_subtract'),
+            scriptPath: subtractScriptPath,
+            tempDir: tempDirs.subtract,
             inputData: { model: modelStlData, logo: logoStlData },
             buildArgs: ({ inputPaths, outputPath }) => [
                 inputPaths.model,
@@ -217,8 +227,8 @@ app.post('/api/intersect-stl-scripted', async (req, res) => {
     }
     try {
         const { result } = await runPythonScript({
-            scriptPath: path.join(__dirname, 'subtract_script.py'),
-            tempDir: path.join(__dirname, 'temp_intersect'),
+            scriptPath: subtractScriptPath,
+            tempDir: tempDirs.intersect,
             inputData: { model: modelStlData, logo: logoStlData },
             buildArgs: ({ inputPaths, outputPath }) => [
                 inputPaths.model,
@@ -255,8 +265,8 @@ app.post('/api/intersect-thin-stl-scripted', async (req, res) => {
     }
     try {
         const { result } = await runPythonScript({
-            scriptPath: path.join(__dirname, 'subtract_script.py'),
-            tempDir: path.join(__dirname, 'temp_intersect_thin'),
+            scriptPath: subtractScriptPath,
+            tempDir: tempDirs.intersectThin,
             inputData: { model: modelStlData, logo: logoStlData },
             buildArgs: ({ inputPaths, outputPath }) => [
                 inputPaths.model,

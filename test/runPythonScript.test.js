@@ -54,3 +54,24 @@ test('runPythonScript propagates python errors', async () => {
   const remaining = await fs.promises.readdir(tempDir);
   assert.deepStrictEqual(remaining, []);
 });
+test('runPythonScript errors when python executable is missing', async () => {
+  const scriptDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'script-'));
+  const scriptPath = path.join(scriptDir, 'noop.py');
+  await fs.promises.writeFile(scriptPath, 'open(__import__("sys").argv[2], "w").write("ok")', 'utf8');
+
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'temp-'));
+  await assert.rejects(
+    () =>
+      runPythonScript({
+        scriptPath,
+        tempDir,
+        inputData: { input: 'data' },
+        buildArgs: ({ inputPaths, outputPath }) => [inputPaths.input, outputPath],
+        pythonExecutable: 'nonexistent-python',
+        logPrefix: 'Test'
+      }),
+    /Python executable not found/
+  );
+  const remaining = await fs.promises.readdir(tempDir);
+  assert.deepStrictEqual(remaining, []);
+});
