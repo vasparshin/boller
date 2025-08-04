@@ -2,15 +2,16 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>3D Logo Viewer</title>
+  <title>Vector Logo Viewer</title>
   <style>
-    body { margin: 0; overflow: hidden; }
+    body { margin: 0; }
     #logoInput { position: absolute; top: 10px; left: 10px; z-index: 10; }
-    canvas { display: block; }
+    #logoDisplay { display: block; max-width: 100%; height: auto; }
   </style>
 </head>
 <body>
-  <input type="file" id="logoInput" accept="image/*" />
+  <input type="file" id="logoInput" accept=".svg,.dxf,.dwg,image/svg+xml" />
+  <img id="logoDisplay" alt="Vector logo preview" />
   <script type="module" src="main.js"></script>
 </body>
 </html>
