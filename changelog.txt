@@ -1,0 +1,429 @@
+# Boller3D Changelog
+
+**v1.0.102 (Completed)**
+*   **Task:** Final Fix for Boolean Operation Stability and Watertightness.
+*   **Files:** `subtract_script.py`
+*   **Notes:** Re-architected the boolean operations script to include a comprehensive and aggressive mesh healing strategy at every critical step, resolving persistent crashes and geometry corruption. A dedicated `heal_mesh` function using `PyMeshFix` is now applied to: 1) The initial model and logo meshes upon loading. 2) The intermediate results of the multi-stage "thin intersection" operation. 3) The final result of ALL boolean operations (`intersection`, `thin_intersection`, `subtraction`) before the file is saved. This ensures that all meshes are watertight and valid before being used in any `trimesh` operation, finally providing the stability needed to prevent crashes and produce clean, correct output for both "Cut Logo" and "Cut Thin Logo" functions.
+
+**v1.0.101 (Completed)**
+*   **Task:** Fix "Cut Thin Logo" Watertightness and Stability.
+*   **Files:** `subtract_script.py`
+*   **Notes:** Implemented a mesh healing step using `PyMeshFix` to address the core instability of the "Cut Thin Logo" operation. The previous implementation crashed during Stage 3 (final intersection) because the intermediate meshes from Stage 1 and Stage 2 were not watertight or had other geometric artifacts. The new process now "heals" the result of Stage 1 and the offset model from Stage 2 *before* attempting the final intersection. This significantly improves the robustness of the operation, prevents crashes, and ensures the `thickness_delta` parameter works as expected by allowing the 3-stage process to complete successfully.
+
+**v1.0.100 (Completed)**
+*   **Task:** Fix Cut Thin Logo Algorithm and Watertightness Issues.
+*   **Files:** `subtract_script.py`
+*   **Notes:** Completely rewrote the thin intersection algorithm to fix multiple issues: 1) Non-watertight results with multi-body logos - replaced scaling approach with proper two-stage boolean process that preserves watertightness. 2) Logo Thickness Delta not working properly - now correctly controls the distance from the logo's back face to the inner surface of the model. **Two-Stage Process**: Stage 1: Find boolean overlap of logo STL and main model (logo AND model). Stage 2: Create copy of main model offset outward by thickness_delta. Stage 3: Find boolean overlap between Stage 1 result and offset model copy. This creates a logo that penetrates from the outer surface but stops exactly thickness_delta distance away from the inner surface, ideal for donut-like models where the logo should be visible from outside but not break through to the inside.
+
+**v1.0.99 (Completed)**
+*   **Task:** Fix Thin Intersection Quality and Boolean Operations Robustness.
+*   **Files:** `subtract_script.py`
+*   **Notes:** Completely overhauled Boolean operations to eliminate crashes and quality issues. **Thin Intersection Fix:** Replaced fundamentally flawed 3-stage approach (intersection → translate → re-intersection) with simple and reliable method: 1) Standard intersection preserves all logo detail (individual letters, closed paths), 2) 5% uniform scale reduction for thinning effect, 3) Optional slight inward movement for significant thickness deltas. This eliminates "Not all meshes are volumes!" errors and prevents logo detail loss. **Subtraction Fix:** Added comprehensive error handling for subtraction operations when dealing with non-manifold geometry from Boolean results. Implements 3-tier repair strategy: 1) Aggressive mesh cleanup and repair, 2) Union-based manifold forcing, 3) Graceful fallback to original model. This ensures Cut Out operations never crash the server and always provide meaningful results. Both fixes make the Boolean workflow robust across all geometry types while preserving maximum detail quality.
+
+**v1.0.98 (Completed)**
+*   **Task:** Add Automatic Logo STL Thickness Enhancement.
+*   **Files:** `app.js`
+*   **Notes:** Enhanced Logo STL creation to automatically add 0.2mm thickness in the blue axis (X axis in project coordinates). Modified `getSvgToStlOptions()` function to automatically add 0.2mm to the user-specified thickness value before passing it to the STL generation process. This ensures all Logo STLs are automatically thickened by 0.2mm without requiring user intervention. Added clear logging to show both the base thickness (from UI input) and final thickness (base + 0.2mm auto-thickening). The enhancement is applied during STL generation via the `typeDepth` parameter passed to `window.renderObject()`.
+
+**v1.0.97 (Completed)**
+*   **Task:** Improve Logo Decal Quality and Reduce Visual Artifacts.
+*   **Files:** `app.js`
+*   **Notes:** Enhanced logo decal rendering quality to fix "interference" or line artifacts that made logos look poor quality. Applied multiple improvements: 1) Increased texture resolution from 1024px to 2048px for sharper detail. 2) Enabled high-quality image smoothing with anti-aliasing instead of disabled smoothing. 3) Added proper texture filtering (LinearMipmapLinearFilter) with mipmap generation for better scaling quality. 4) Set texture wrapping to ClampToEdgeWrap to prevent edge artifacts. 5) Added alphaTest (0.1) to reduce transparency artifacts. 6) Disabled depthWrite while keeping depthTest to prevent z-fighting. 7) Added larger surface offset (0.1 units) to prevent decals from fighting with model surface - similar to cut logo offset requirement. 8) Set renderOrder to 1 for proper depth sorting. 9) Added polygonOffset settings (polygonOffsetFactor: -1, polygonOffsetUnits: -1) specifically designed for decal rendering to eliminate z-fighting. Applied these improvements to all decal creation functions (showLogo, applyLogoScale, centerLogo, createOrUpdateMirroredLogo). The z-fighting issue is exactly like the "cut logo" problem where surfaces at the same depth cause interference patterns.
+
+**v1.0.96 (Completed)**
+*   **Task:** Enable Logo Scaling Down for Large Logos (Max Scale 1.0).
+*   **Files:** `app.js`
+*   **Notes:** Fixed the issue where large logos like "Boller squash.svg" couldn't be resized. Previously, when a logo had max scale 1.0 (meaning it was already at maximum size for the placement area), the slider was completely disabled. Now implemented smart scaling: 1) For logos with max scale > 1.0: Normal scaling from 1.0 to max scale. 2) For logos with max scale ≤ 1.0: Reverse scaling from 1.0 down to 0.3 (allows making large logos smaller). The slider now maps its range (1.0-1.7) to scale range (0.3-1.0) for large logos, with clear logging to show the mapping. Users can now reduce the size of any logo, including large ones that fill the entire placement area.
+
+**v1.0.95 (Completed)**
+*   **Task:** Fix Logo Scale Slider Initialization, Infinite Loop, and Excessive Logging.
+*   **Files:** `app.js`
+*   **Notes:** Fixed critical issues with logo scale slider: 1) Logo scale input was not found during initialization - moved event listener attachment to after DOM binding. 2) Infinite scaling loop in animate function was constantly applying scale changes - disabled the problematic real-time scale check and now rely only on event listeners. 3) Reduced excessive debug logging - now only shows final applied scale. 4) Added special case handling for logos with max scale of 1.0 (like "Boller squash.svg") - slider correctly shows no effect message instead of trying to scale. Logo scale slider should now work properly for all logos without performance issues.
+
+**v1.0.94 (Completed)**
+*   **Task:** Fix Logo Scale Slider, Mirror STL Positioning, Cut Result Z Offset Auto-Apply, and STL Thickness Default.
+*   **Files:** `app.js`, `index.html`
+*   **Notes:** Fixed multiple critical issues: 1) Logo scale slider was not working due to scoping issues - moved handleLogoScaleChange to global scope with proper debugging logs. 2) Mirror STL was only mirroring in one plane - now mirrors in both X and Z axes to properly position on opposite side of donut-shaped models. 3) Cut result Z offset was not being automatically applied after "Cut Thin Logo" operation - now auto-applies the offset value immediately after the operation. 4) Increased default STL thickness from 10mm to 10.2mm (0.2mm thicker) as requested for better logo geometry. All logo controls should now work properly with clear debug logging.
+
+**v1.0.93 (Completed)**
+*   **Task:** Fix Logo Movement Constraints, Scale Slider, and Mirror STL Functionality.
+*   **Files:** `app.js`
+*   **Notes:** Fixed multiple issues with logo controls and mirror STL functionality: 1) Logo movement was being blocked by overly restrictive boundary checks - now allows small movements even if they slightly exceed boundaries. 2) Added proper error checking and logging for logo scale slider event listeners to debug scaling issues. 3) Completely rewrote mirror STL functionality to mirror the "Cut Thin Logo" result instead of the original logo STL, and positioned it using the same transform logic as the double-sided logo decal for proper placement. 4) Added automatic mirror STL update when "Cut Thin Logo" operation completes and mirror checkbox is checked. The mirror STL now appears in cyan color and correctly mirrors the cut result to the opposite side of the model.
+
+**v1.0.92 (Completed)**
+*   **Task:** Fix Logo Thickness Direction, Mirror STL Functionality, and Enhanced Cutout Operations.
+*   **Files:** `subtract_script.py`, `index.html`, `app.js`
+*   **Notes:** Fixed logo thickness delta direction by changing from negative Z to positive Z direction in the two-stage boolean operation. Updated default "Cut Result Z Offset" from 0.05mm to 0.075mm for better boolean operation stability. Enhanced mirror STL functionality to create a proper mirrored copy of the logo STL on the opposite side of the model with cyan coloring for visual distinction. Fixed mirror STL workflow to work properly after "Cut Thin Logo" operations. Enhanced cutout operations (`performCutoutOperation`) to handle both original and mirrored STL when mirror is enabled - performs sequential subtractions to remove both logo geometries from the model. Added comprehensive debug logging to logo scale and position controls to help diagnose interaction issues. The mirror STL feature now properly creates a symmetric logo on both sides of the model (like both sides of a donut) and the cutout operations will subtract both when "Cut Out Thin Logo Result" is clicked.
+
+**v1.0.91 (Completed)**
+*   **Task:** Fix Cut Thin Logo Two-Stage Boolean Operation and Default Cut Result Offset.
+*   **Files:** `subtract_script.py`, `index.html`
+*   **Notes:** Fixed the "Cut Thin Logo" operation to perform the proper two-stage boolean process as intended. Previously, the thin intersection was simply moving the logo forward and performing a single intersection, which was not creating the correct thin logo geometry. Updated `subtract_script.py` to implement the correct three-stage process: 1) Find overlapping regions between logo STL and main STL (intersection), 2) Move the result inward by thickness_delta in negative Z direction, 3) Find overlapping regions between the moved result and main STL (second intersection). This ensures proper logo geometry that only appears on the outer surface without going through the entire model (like a logo on the side of a donut that doesn't show in the hole). Changed default "Cut Result Z Offset" from 0.0mm to 0.05mm and reduced step size to 0.01mm to prevent boolean operation issues caused by exactly coincident surfaces between logo STL and main model. This addresses the core issue where "Cut Logo" and "Cut Thin Logo" were producing identical results despite different thickness delta values.
+
+**v1.0.90 (Completed)**
+*   **Task:** Add DXF and DWG File Support for Logo Creation.
+*   **Files:** `package.json`, `app.js`, `index.html`, `js/vectorConverter.js` (new file), `change_proposal.md`
+*   **Notes:** Added comprehensive support for DXF and DWG vector files alongside existing SVG support. Installed `dxf` and `@mlightcad/libredwg-web` npm packages for vector file conversion. Created new `js/vectorConverter.js` module with functions for detecting file types, validating file sizes, and converting DXF/DWG files to SVG format. Updated file input to accept `.dxf` and `.dwg` extensions. Modified `handleLogoSelection()` function to automatically detect file type and route to appropriate converter. Added loading indicators and error handling for conversion operations. Fixed DXF library import issue by loading the dxf library via script tag in HTML and accessing it through global `window.dxf` object instead of ES6 import. Fixed preview generation issue for converted vector files by adding `createPreviewFromSvgPaths()` function that creates proper image previews from converted SVG path data instead of trying to read DXF/DWG files as images. Enhanced preview generation with automatic bounding box calculation, proper viewBox scaling, and coordinate system handling to correctly display converted DXF/DWG content instead of showing blank squares. Fixed white mask forcing issue that was converting all content to solid white squares by enhancing the white mask conversion for DXF/DWG files to preserve geometry while converting all colored content to white masks compatible with the material color system. Removed white background from generated SVG previews and improved stroke visibility to ensure proper mask generation. The conversion process is transparent to users - DXF and DWG files are automatically converted to SVG and then processed through the existing SVG-to-STL pipeline. Supports basic vector entities including lines, circles, arcs, and polylines. Added comprehensive error handling with user-friendly messages and file size limits (10MB) for vector files.
+
+**v1.0.89 (Completed)**
+*   **Task:** Enable Logo STL Reusability and Add Cut Out Result Operations.
+*   **Files:** `app.js`, `index.html`
+*   **Notes:** Removed button disabling logic from all cut operations, allowing the Logo STL to be reused multiple times without needing to recreate it. Added "Cut Out Logo Result" and "Cut Out Thin Logo Result" buttons that use the results from "Cut Logo" and "Cut Thin Logo" operations respectively to subtract from the original model. Added "Debug Models" button in Advanced View Options that logs detailed information about all available models (main model, logo STL group, boolean result mesh, logo decal mesh) to the console for debugging purposes. Implemented `cutoutLogoResultFromModel()`, `cutoutThinLogoResultFromModel()`, `performCutoutOperation()` helper function, and `debugAvailableModels()` function. Updated DOM bindings, event listeners, and button state management to support the new workflow where multiple cut operations can be performed without regenerating the Logo STL.
+
+**v1.0.88 (Completed)**
+*   **Task:** Add Logo Thickness Delta Control and Fix Cut Logo Visualization Issues.
+*   **Files:** `app.js`, `index.html`, `main-server.js`, `subtract_script.py`
+*   **Notes:** Added a new "Logo Thickness Delta" input control next to the "Thickness" input, allowing manual specification of the Z-axis translation value for the "Cut Thin Logo" operation (instead of hardcoded 1mm). Modified `subtract_script.py` to accept `--thickness-delta` parameter. Updated `/api/intersect-thin-stl-scripted` endpoint to accept and pass the `thicknessDelta` value from UI. Enhanced boolean result mesh cleanup by explicitly setting the reference to null after disposal and adding clearer logging for previous mesh removal. Added forced renderer updates and changed "Cut Thin Logo" default color to green for better visual distinction from "Cut Logo" (orange). Fixed DOM element binding for the new thickness delta input and updated element validation checks.
+
+**v1.0.87 (Completed)**
+*   **Task:** Fixed console logging: Removed colored console logs, kept only bold styling for user interactions (button clicks) for better visibility
+*   **Task:** Fixed download functionality: Now properly downloads cut results instead of duplicating main model and logo STL files
+*   **Task:** Added operation type tracking: Boolean result meshes now store their operation type ('cut-logo' or 'cut-thin-logo') for proper filename generation
+*   **Task:** Enhanced download handler: Downloads all visible parts in visualizer exactly once (main model, logo STL, and cut result if exists)
+*   **Task:** Improved version logging: Cleaned up duplicate version messages and updated version display text
+*   **Task:** Updated all user interaction logs to use consistent bold styling without colors
+*   **Files:** `app.js`
+*   **Notes:** Enhanced the boolean operation logging and visual feedback system. Added automatic bounding box logging immediately after each boolean operation completes, with color-coded bold console messages: Green for "Cut Logo" results, Orange for "Cut Thin Logo" results. Updated all UI interaction logs to use bold colored text with appropriate color coding (Blue for toggles, Orange for STL actions, Purple for decals, Red for errors). Changed default boolean result colors: "Cut Logo" defaults to bright green, "Cut Thin Logo" defaults to orange for better visual distinction. Enhanced material properties with higher shininess and explicit transparency settings. All button clicks and UI interactions now produce clearly visible bold logs in the console, making debugging and operation tracking much easier.
+
+**v1.0.86 (Completed)**
+*   **Task:** Enhanced Logging with Bold Colors and Automatic Bounding Box Display.
+*   **Files:** `app.js`
+*   **Notes:** Enhanced the boolean operation logging and visual feedback system. Added automatic bounding box logging immediately after each boolean operation completes, with color-coded bold console messages: Green for "Cut Logo" results, Orange for "Cut Thin Logo" results. Updated all UI interaction logs to use bold colored text with appropriate color coding (Blue for toggles, Orange for STL actions, Purple for decals, Red for errors). Changed default boolean result colors: "Cut Logo" defaults to bright green, "Cut Thin Logo" defaults to orange for better visual distinction. Enhanced material properties with higher shininess and explicit transparency settings. All button clicks and UI interactions now produce clearly visible bold logs in the console, making debugging and operation tracking much easier.
+
+**v1.0.85 (Completed)**
+*   **Task:** Add Toggle Cut Result Button for Better Boolean Operation Comparison.
+*   **Files:** `app.js`, `index.html`
+*   **Notes:** Added "Toggle Cut Result" button to Advanced View Options to allow users to show/hide the boolean operation result mesh. This helps with comparing the visual differences between "Cut Logo" and "Cut Thin Logo" operations, especially when the 1mm offset difference is subtle. The toggle function includes bounding box logging for debugging size differences. Added `toggleCutResultBtn` DOM binding, `toggleCutResultVisibility()` function with detailed logging, and event listener setup. Users can now toggle the cut result visibility on/off to better understand and compare the effects of different boolean operations.
+
+**v1.0.84 (Completed)**
+*   **Task:** Fix Reload Model to Preserve Boolean Results and Add Cut Result Color Control.
+*   **Files:** `app.js`, `index.html`
+*   **Notes:** Fixed the "Reload Model" functionality to correctly preserve boolean operation results (from "Cut Logo" or "Cut Thin Logo") as separate meshes while restoring the original model. Modified `cutLogoWithModel()` and `cutThinLogoWithModel()` to create `booleanResultMesh` as an independent object instead of replacing the model geometry. Added new "Cut Result" color dropdown with full color management including conflict prevention, styling, and live color updates. Added `booleanResultColorSelect` DOM binding, event listeners, and integration with the color selection system. Users can now: 1) Perform cut operations to create boolean results, 2) Use "Reload Model" to restore original model while keeping cut results visible, 3) Control colors of both the original model and the cut result independently, 4) See both bodies simultaneously in the visualizer.
+
+**v1.0.83 (Completed)**
+*   **Task:** Add Reload Model Button.
+*   **Files:** `app.js`, `index.html`
+*   **Notes:** Added "Reload Model" button that restores the original model to the viewer after "Cut Logo" or "Cut Thin Logo" operations. This enables a workflow where users can: 1) Load a model, 2) Load a logo, 3) Use "Cut Logo" or "Cut Thin Logo" to create the logo body, 4) Click "Reload Model" to restore the original model, and 5) Use "Cut Out Logo" to subtract the logo from the original model. Added `currentModelFilename` state variable to track the loaded model, `reloadModel()` function, DOM binding for `reloadModelBtn`, event listener setup, and button state management in both success and error cases. The button is disabled initially and enabled only after a model is successfully loaded.
+
+**v1.0.82 (Completed)**
+*   **Task:** Add Cut Thin Logo Button for 1mm Thinner Intersection.
+*   **Files:** `app.js`, `main-server.js`, `subtract_script.py`, `index.html`
+*   **Notes:** Added new "Cut Thin Logo" button that performs intersection operation but makes the result 1mm thinner by moving the logo 1mm forward in Z direction before intersection. Modified Python script to support `thin_intersection` operation with `--operation thin_intersection` parameter. Added new `/api/intersect-thin-stl-scripted` endpoint. Added `cutThinLogoWithModel()` function and corresponding DOM bindings, event listeners, and button state management. The feature uses the same robust Trimesh backend as other boolean operations but applies a 1mm Z-translation to the logo before performing intersection, effectively creating a thinner cut result.
+
+**v1.0.81 (Completed)**
+*   **Task:** Fix Cut Logo Function to Use Server-Side Intersection.
+*   **Files:** `app.js`, `main-server.js`, `subtract_script.py`
+*   **Notes:** Fixed the "Cut Logo" function corruption issue by replacing the client-side intersection operation with server-side intersection. The root cause was that `cutLogoWithModel` was performing client-side INTERSECTION using the three-bvh-csg library, which produced corrupted/hollow output. Modified the Python script to accept an `--operation` parameter for both subtraction and intersection. Added new `/api/intersect-stl-scripted` endpoint for intersection operations. Fixed Unicode encoding error in Python script by removing intersection (∩) and subtraction (-) symbols from print statements that caused failures on Windows CP1252 encoding. "Cut Logo" now performs reliable server-side INTERSECTION (Model AND Logo overlap) to keep only overlapping geometry, while "Cut Out Logo" continues to perform SUBTRACTION (Model MINUS Logo) to remove logo from model. Both functions now use robust Trimesh boolean operations on the server side.
+
+**v1.0.80 (Completed)**
+*   **Task:** Improve Cut Logo CSG Quality and Add Geometry Validation.
+*   **Files:** `app.js`
+*   **Notes:** Enhanced the `cutLogoWithModel` function to address hollow/corrupted geometry issues from client-side CSG intersection. Disabled material groups in CSG evaluator to avoid conflicts. Added comprehensive geometry validation including NaN/invalid vertex detection and cleanup, duplicate vertex merging using BufferGeometryUtils.mergeVertices, and triangle count validation. Added user guidance to use "Cut Out Logo" (server-side) if client-side intersection produces poor results. The hollow geometry issue appears to be a limitation of the three-bvh-csg library's intersection operation.
+
+**v1.0.79 (Completed)**
+*   **Task:** Simplify Cut Logo Geometry Handling.
+*   **Files:** `app.js`
+*   **Notes:** Simplified the CSG result handling in `cutLogoWithModel` function. Instead of trying to transform from world space to local space, now applying the CSG result geometry directly to the model at origin since the geometry is already in world coordinates. Added detailed logging to track geometry bounds and center before and after processing. This approach should eliminate coordinate transformation issues that were causing visual corruption.
+
+**v1.0.78 (Completed)**
+*   **Task:** Fix Cut Logo Coordinate Space Transformation Issue.
+*   **Files:** `app.js`
+*   **Notes:** Fixed the actual corruption issue in `cutLogoWithModel` function. The problem was that CSG operations produce geometry in world space, but the result was being applied directly to the model without proper coordinate transformation. Added inverse matrix transformation to convert the CSG result from world space back to local space before applying to the model. This ensures the intersection geometry appears correctly positioned and oriented in the visualizer.
+
+**v1.0.77 (Completed)**
+*   **Task:** Improve Cut Logo Debugging and User Feedback.
+*   **Files:** `app.js`
+*   **Notes:** Added detailed logging to `cutLogoWithModel` function to help diagnose intersection results. Added vertex count, size, center, and bounds information for intersection results. Added warning system for very small intersection results with user notification. This helps users understand when the "Cut Logo" operation produces a small result that may be hard to see, rather than appearing as corruption.
+
+**v1.0.76 (Completed)**
+*   **Task:** Fix Cut Logo Button States and STL Corruption Issue.
+*   **Files:** `app.js`, `index.html`
+*   **Notes:** Made "Cut Logo" and "Cut Out Logo" buttons disabled until "Repair STL" is pressed, ensuring proper workflow. Removed "Toggle Mirror STL" button from advanced view options and cleaned up related code references. Fixed STL corruption issue in `cutLogoWithModel` by properly cloning result geometry and preserving original model transforms instead of resetting them. Updated button enabling logic in `repairStl` function to enable both cut buttons after successful repair.
+
+**v1.0.75 (Completed)**
+*   **Task:** Fix Logo STL Horizontal and Vertical Inversion Issue.
+*   **Files:** `js/SVGtoSTL.js`, `app.js`, `index.html`
+*   **Notes:** Fixed logo STL inversion by analyzing coordinate system with axis helper. Project coordinate convention: Green=Z(height), Red=Y(width), Blue=X(length). THREE.js default: Red=X, Green=Y, Blue=Z. Applied simple Y-flip transformation (`makeScale(1, -1, 1)`) in `matchLogoTransform` to correct orientation in Red-Blue plane. Removed unnecessary rotation that was causing positioning issues. Added axis helper toggle for future debugging. Updated debug logging and version number to v1.0.75.
+
+**v1.0.74 (Completed)**
+*   **Task:** UI Refinements & Pop-up Removal.
+*   **Files:** `index.html`, `styles.css`, `app.js`
+*   **Notes:** Arranged Model/Logo/STL color selectors horizontally. Arranged Model/Quantity/Currency controls inline (label | input). Created collapsible "Advanced View Options" dropdown for view controls. Added "Toggle Mirror STL" button to advanced options. Removed success alert from server-side logo subtraction (`cutoutLogoFromModel`).
+
+**v1.0.73 (Completed)**
+*   **Task:** Refine Color Selection & STL Options (High Priority).
+*   **Files:** `app.js`, `index.html`, `js/SVGtoSTL.js`
+*   **Notes:** Implemented dynamic disabling of conflicting color options in dropdowns, removed same-color alerts (`app.js`). Reordered STL color/mirror controls below logo color (`index.html`). Added live color updates for generated STL mesh (`app.js`). Added geometric mirroring for generated STL via "Mirror Logo STL" checkbox (`js/SVGtoSTL.js`).
+
+**v1.0.72 (Completed)**
+*   **Task:** Fix Missing SVG/STL Controls & Error.
+*   **Files:** `index.html`, `app.js`
+*   **Notes:** Re-added `curve-segments`, `stl-color`, and `mirror-stl` controls to `index.html`, which were accidentally removed in v1.0.71. This fixes the `TypeError: Cannot read properties of null (reading 'value')` in `getSvgToStlOptions` (`app.js`). Also removed the "STL Options:" label and "SVG Import Options:" heading from `index.html` as requested.
+
+**v1.0.71 (Completed)**
+*   **Task:** Simplify SVG to STL Options (Remove unused UI controls and update related logic).
+*   **Files:** `index.html`, `app.js`, `js/SVGtoSTL.js`
+*   **Notes:** Removed `type-size`, `invert-type`, `bevel-enabled`, and `reverse-winding` UI controls from `index.html`. Updated `getSvgToStlOptions` in `app.js` to exclude these. Updated `applyFinalTransforms` in `js/SVGtoSTL.js` to use a default `typeSize` of 100 if not provided and to ensure `bevelEnabled` defaults to `false` (handled by `renderObject` logic) and `wantInvertedType` retains its previous default behavior (not inverting).
+
+**v1.0.70 (Completed)**
+*   **Task:** Begin Phased Modularization (Extract `uiHandler.js`).
+*   **Files:** `app.js`, `modules/uiHandler.js` (New File)
+*   **Notes:** Started extraction of UI-related logic (DOM elements, event listeners, UI update functions) from `app.js` into `modules/uiHandler.js`.
+
+**v1.o.69 (Completed)**
+*   **Task:** Investigate intermittent server-side subtraction failures (`/api/subtract-stl-scripted`).
+*   **Files:** `README.md`, `directory.txt` (Documentation updates)
+*   **Notes:** Server-side subtraction calls (`/api/subtract-stl-scripted` -> Python/Trimesh) completed without `500` errors in the latest test run. However, the user reported that the resulting subtracted geometry is visually incorrect ("whack"). Fixing the geometric correctness of the subtraction result is deferred. Updated documentation to reflect this.
+
+**v1.0.68 (Skipped - Now v1.0.70)**
+*   **Task:** Begin Phased Modularization (Extract `uiHandler.js`)
+*   **Files:** `app.js`, `modules/uiHandler.js` (New File)
+*   **Notes:** Moved core Three.js variables (`scene`, `camera`, `renderer`, `controls`, `loader`, `raycaster`, `mouse`, `svgToStlGroup`) and functions (`setupThreeJS`, `onWindowResize`) to `modules/threeSetup.js`. Updated `app.js` to import from the new module. Updated `index.html` to load `app.js` as `type="module"`. Fixed subsequent `ReferenceError: STLLoader is not defined` in `repairStl` and `cutoutLogoFromModel` by removing local instantiations and using the imported `loader` instance.
+
+**v1.0.67 (Completed)**
+*   **Task:** Begin Phased Modularization (Extract `threeSetup.js`).
+*   **Files:** `app.js`, `index.html`, `modules/threeSetup.js` (New File)
+*   **Notes:** Moved core Three.js variables (`scene`, `camera`, `renderer`, `controls`, `loader`, `raycaster`, `mouse`, `svgToStlGroup`) and functions (`setupThreeJS`, `onWindowResize`) to `modules/threeSetup.js`. Updated `app.js` to import from the new module. Updated `index.html` to load `app.js` as `type="module"`. Fixed subsequent `ReferenceError: STLLoader is not defined` in `repairStl` and `cutoutLogoFromModel` by removing local instantiations and using the imported `loader` instance.
+
+**v1.0.66 (Completed)**
+*   **Task:** Update Documentation (File Structure).
+*   **Files:** `README.md`
+*   **Notes:** Corrected the File Structure section to accurately reflect that SVG-to-STL logic is primarily handled by libraries (`js/SVGtoSTL.js`, `js/external/d3-threeD.js`) called from `app.js`, not solely within `app.js`.
+
+**v1.0.65 (Completed)**
+*   **Task:** Verify Phased jQuery Replacement - DOM Manipulation in `app.js`.
+*   **Files:** `app.js`
+*   **Notes:** Reviewed `app.js` functions (`updatePrice`, `fetchAndPopulateModels`, `loadModel`, `handleLogoSelection`, `resetLogoState`, etc.). Confirmed remaining DOM manipulations were already using Vanilla JS (e.g., `.textContent`, `.value`, `.disabled`, `.innerHTML = ''`, `createElement`, `appendChild`). No code changes required for this version as jQuery DOM manipulation was largely addressed during event listener conversion (v1.0.64) and SVG parsing conversion (v1.0.63).
+
+**v1.0.64 (Completed)**
+*   **Task:** Increase Server Request Body Size Limit & Fix 413 Error.
+*   **Files:** `main-server.js`
+*   **Notes:** Removed external `body-parser` dependency. Implemented built-in `express.json({ limit: '100mb' })` and `express.urlencoded({ limit: '100mb' })`. Confirmed fix for `413 Payload Too Large` error during server-side subtraction with large logo STLs.
+
+**v1.0.63 (Completed)**
+*   **Task:** Remove jQuery Dependency (Final Step).
+*   **Files:** `index.html`, `app.js`
+*   **Notes:** Replaced last jQuery usage (`$.parseXML`, `.find`, `.map`, `.get`, `.attr`) in `handleLogoSelection` with Vanilla JS (`DOMParser`, `querySelectorAll`, `Array.from`, `getAttribute`). Commented out jQuery `<script>` tag in `index.html`. **Introduced Issue:** Server-side subtraction failed due to payload size limit (HTTP 413) with large logo STLs, addressed in v1.0.64.
+
+**v1.0.62**
+- Investigated D3.js usage. Found it is essential for SVG path transformation (`d3.transformSVGPath` used in `convertSvgToStl` via `js/SVGtoSTL.js`). No changes made.
+
+**v1.0.61**
+- Removed Chroma.js dependency.
+- Modified color dropdowns to show only color swatches (no text) and update select background color.
+
+**v1.0.60**
+- Implemented a unified "Download Model STL" button, replacing separate model/logo download buttons.
+- Removed old download/save button variables and listeners.
+- Fixed console errors related to removed button references in `initSvgToStl`.
+
+**v1.0.59**
+- Fixed logo scale slider real-time visual updates by restoring scale check logic within the `animate` function.
+
+**v1.0.58**
+- Removed unused state variables (`isRotating`, `rotationSpeed`) from `app.js`.
+- *Note:* This change inadvertently broke the logo scale slider's real-time visual update, fixed in v1.0.59.
+- Updated `change_proposal.md` with a detailed, versioned refactoring plan including specific steps and testing requirements for each version increment.
+
+**v1.0.57 (Completed)**
+*   **Task:** Initial Setup & Refactoring Plan.
+*   **Files:** `README.md`, `change_proposal.md`, `directory.txt`
+*   **Notes:** Established versioned refactoring plan. Created initial analysis documents. Set baseline version.
+
+**v1.0.56**
+- Created `directory.txt` to document libraries, global variables, and primary functions in `app.js` for future code analysis and cleanup.
+
+**v1.0.55**
+- Attempted to fix `trimesh` error `ValueError: Not all meshes are volumes!`.
+- Added calls to `mesh.fill_holes()` and `mesh.fix_normals()` for both model and logo meshes within `subtract_script.py` immediately before the boolean difference operation.
+
+**v1.0.54**
+- Switched boolean subtraction implementation in `subtract_script.py` from `pyvista` to `trimesh` in an attempt to resolve persistent boolean operation failures.
+- Updated `requirements.txt` to add `trimesh` and `scipy` (keeping `pyvista` and `ipython` as they are needed for `repair_script.py`).
+- Updated README prerequisites list.
+
+**v1.0.53**
+- Fixed `TypeError: bad operand type for unary -: 'tuple'` in `subtract_script.py`.
+- Corrected the negation of the center point coordinates when translating the logo mesh before scaling.
+
+**v1.0.52**
+- Attempted workaround for PyVista boolean difference failure.
+- Added code in `subtract_script.py` to scale the logo mesh by 1.01x before subtraction, aiming to avoid issues potentially caused by coincident surfaces.
+
+**v1.0.51**
+- Added check in `subtract_script.py` to detect if PyVista boolean difference results in an empty mesh (0 points).
+- If the result is empty, the script now prints an error and exits with a non-zero status code, preventing the misleading `STLLoader` error in the browser and providing a clearer failure indication in the Node.js logs.
+
+**v1.0.50**
+- Attempted to fix PyVista boolean difference failure (resulting in empty mesh and STLLoader error).
+- Uncommented mesh cleaning (`.clean().extract_surface().triangulate()`) in `subtract_script.py` before the boolean operation to improve mesh quality and potentially resolve internal VTK errors.
+
+**v1.0.49**
+- Addressed `ImportError: Install IPython...` when running `subtract_script.py` with PyVista.
+- Added `ipython` dependency to `requirements.txt` as it appears to be checked by PyVista during initialization, even when disabling the Jupyter backend.
+
+**v1.0.48**
+- Implemented actual boolean subtraction (model - logo) in `subtract_script.py` using `pyvista.boolean_difference()`.
+- Replaced the previous placeholder logic that returned the original model.
+- Added `pyvista` dependency to `requirements.txt`.
+
+**v1.0.47**
+- Fixed `AttributeError: module 'stl.mesh' has no attribute 'Mode'` in `subtract_script.py`.
+- Changed save mode usage from `mesh.Mode.ASCII` to the correct `stl.Mode.ASCII` (requires importing `stl`).
+
+**v1.0.46**
+- Added Python version and path logging in `main-server.js` before executing subtraction script to help diagnose module errors.
+- Ensured the full Python script error (stderr) is logged to the Node.js console and sent in the API response details on failure.
+
+**v1.0.45**
+- Addressed Python script failure (500 Internal Server Error) during subtraction.
+- Explicitly added `numpy` to `requirements.txt` as it's a core dependency for `numpy-stl` and the subtraction script, ensuring it gets installed correctly.
+
+**v1.0.44**
+- Refactored STL subtraction to use a Python script (`subtract_script.py`) executed by the Node.js server (`main-server.js` via `/api/subtract-stl-scripted`) instead of requiring a separate running Python Flask server.
+- Removed the Flask server (`server.py`).
+- Updated `requirements.txt` to remove Flask and Flask-CORS dependencies.
+- Updated `app.js` to call the new Node.js endpoint for subtraction.
+- Updated `README.md` to remove Python server setup and dependencies, simplifying the run process to only require `node main-server.js`.
+- Updated Troubleshooting section in README.md.
+
+**v1.0.43**
+- Fixed CORS (Cross-Origin Resource Sharing) error (`net::ERR_FAILED`) when calling the Python API (`/api/python-subtract-stl`) from the frontend.
+- Added `Flask-CORS` dependency to `requirements.txt`.
+- Configured CORS in `server.py` to allow requests specifically from the frontend origin (`http://localhost:3000`).
+
+**v1.0.42**
+- Addressed `ModuleNotFoundError: No module named 'flask'` when starting `server.py`.
+- Clarified the difference between the Repair operation (Node server calls Python script) and the Cut Out operation (requires separate, running Python server).
+- Instructed user to run `pip install -r requirements.txt` to install Python dependencies.
+
+**v1.0.41**
+- Changed Python Flask server (`server.py`) port from `5000` to `5001` to troubleshoot connection issues.
+- Updated frontend fetch URL (`app.js`) to match the new port `5001`.
+- Added a Troubleshooting section to `README.md` specifically addressing `net::ERR_CONNECTION_REFUSED` errors for the Python API.
+
+**v1.0.40**
+- Investigating persistent `net::ERR_CONNECTION_REFUSED` error when connecting to the Python server (`server.py` on port 5000).
+- Verified `README.md` instructions for running both servers.
+- Suggested checks for running Python process, terminal errors, firewall rules, and port usage (`netstat`).
+
+**v1.0.39**
+- Incremented `app.js` version to `1.0.7`.
+- Updated `README.md` run instructions to emphasize running both Node.js and Python servers in separate terminals to avoid `ERR_CONNECTION_REFUSED` errors when calling the Python API endpoint.
+
+**v1.0.38**
+- Replaced server-side STL subtraction (previously using `/api/subtract-stl` in `main-server.js`) with a new Python Flask backend (`server.py`).
+- Added `server.py` which defines a `/api/python-subtract-stl` endpoint using Flask and `numpy-stl`.
+- **Note:** The Python subtraction endpoint currently uses `numpy-stl` which has limitations. As a temporary measure, it loads the model and logo STLs but returns the *original* model STL data as a placeholder. This resolves the client-side `STLLoader` parsing error, but the actual geometric subtraction is not yet performed. Further work needed to integrate a robust boolean operation library (e.g., Trimesh, PyVista).
+- Created `requirements.txt` for Python dependencies (`Flask`, `numpy-stl`).
+- Updated `app.js` (`cutoutLogoFromModel` function) to call the new Python endpoint (`http://localhost:5001/api/python-subtract-stl`).
+- Updated `README.md` to include Python server setup, dependencies, and running instructions.
+
+**v1.0.37**
+- Fixed server response for `/api/subtract-stl` endpoint (`main-server.js`). It now correctly sends the result string under the JSON key `subtractedStlData`, resolving the client-side parsing error.
+- Modified the layout in `index.html` to move the "SVG to STL Converter" controls section (`div.svg-to-stl-wrapper`) to appear directly below the main 3D viewer and the right-hand controls panel.
+
+**v1.0.36**
+- Corrected Z-scaling logic in `matchLogoTransform` (`app.js`). It now calculates the Z-scale factor necessary to match the generated STL thickness to the absolute bounding box thickness of the logo decal, rather than using relative scaling. Console log message updated to reflect this.
+- Replaced client-side CSG (using `three-bvh-csg`) in `cutoutLogoFromModel` (`app.js`) with a server-side implementation. The function now exports the model and logo STLs as strings, sends them to the `/api/subtract-stl` endpoint (which uses PyVista), parses the returned subtracted STL, and updates the main model geometry.
+
+**v1.0.35**
+- Restored Z-axis scaling in `matchLogoTransform` (`app.js`) to set initial thickness based on decal, but prevented it from updating the thickness input field to allow manual overrides.
+- Fixed visibility toggle buttons ("Toggle Logo STL", "Toggle Logo Decal") by adding missing event listeners in `setupEventListeners` and logging in `app.js`.
+- Adjusted CSS for `.button-group button` in `styles.css` to allow text wrapping and improve text visibility.
+
+**v1.0.34**
+- Fixed logo STL thickness reverting during cut operations. Modified `matchLogoTransform` in `app.js` to only apply X/Y scaling and translation, preserving the current Z-scale (thickness) of the STL group.
+
+**v1.0.33**
+- Added visibility toggle buttons ("Toggle Logo STL", "Toggle Logo Decal") in `index.html` and implemented corresponding functions (`toggleLogoStlVisibility`, `toggleLogoDecalVisibility`) in `app.js`.
+- Changed enable logic for "Cut Logo" and "Cut Out Logo" buttons in `app.js`. They are now enabled after "Logo STL" is successfully completed and remain enabled.
+- Removed automatic update of the STL thickness input field from the `matchLogoTransform` function in `app.js` to preserve manual settings.
+- Added console logging in `app.js` to show the thickness value used during STL generation (`convertSvgToStl`) and the thickness of the logo tool before CSG operations (`cutLogoWithModel`, `cutoutLogoFromModel`).
+
+**v1.0.32**
+- Re-added console logging for vertex and face counts in the `downloadCurrentModel` function (`app.js`) to provide geometry statistics upon download.
+
+**v1.0.31**
+- Fixed incorrect argument order when calling the Python repair script (`repair_script.py`) from the Node.js server (`main-server.js`). The `inputPath` and `outputPath` were being passed in the wrong positions for the 'repair' operation. The correct argument order `['repair', outputPath, '--input_file', inputPath]` is now used.
+- Changed "Download Cut Model" button to "Download Current Model" (`index.html` & `app.js`).
+- Renamed associated function to `downloadCurrentModel` (`app.js`).
+- Modified download logic to export the current state of the main `model` object, regardless of CSG operations.
+- Button is now enabled whenever a model is loaded and disabled if model loading fails.
+
+**v1.0.30**
+- Reverted `file-saver` loading strategy. Removed the ES module import from `app.js` and the entry from the import map in `index.html`. Now relies solely on the global `saveAs` function provided by the existing `<script src="js/external/FileSaver.js"></script>` tag in `index.html`.
+
+**v1.0.29**
+- Fixed module resolution error for `file-saver`. Added an entry to the import map in `index.html` pointing to the CDN URL.
+
+**v1.0.28**
+- Added "Download Cut Model" button (`download-cut-model-btn`) to `index.html`.
+- Added functionality (`downloadCutModel` in `app.js`) to export the main model geometry after the "Cut Out Logo" operation.
+- Updated button bindings, event listeners, and enable/disable logic in `app.js` for the new button.
+- Added `file-saver` import to `app.js` to handle the download.
+
+**v1.0.27**
+- Fixed `ReferenceError: repairStlBtn is not defined` occurring during initialization. Added missing global variable declaration for `repairStlBtn`.
+
+**v1.0.26**
+- Fixed `ReferenceError: repairStlBtn is not defined` in `cutoutLogoFromModel`. Ensured `repairStlBtn` is bound globally in `bindDOMElements`.
+
+**v1.0.25**
+- Fixed `ReferenceError: cutLogoBtn is not defined` in `cutoutLogoFromModel`. Ensured `cutLogoBtn` is declared globally, bound in `bindDOMElements`, and the local declaration in `initSvgToStl` was removed to prevent shadowing.
+
+**v1.0.24**
+- Enabled the "Cut Out Logo" button (`cutoutLogoBtn`) after successful completion of the "Repair STL" operation in `app.js`, as it requires a single repaired mesh.
+
+**v1.0.23**
+- Added new "Cut Out Logo" button (`cutout-logo-btn`) to `index.html`.
+- Added functionality for the new button (`cutoutLogoFromModel` in `app.js`). This performs a CSG subtraction (Model - Logo) for debugging purposes, modifying the main model geometry.
+- Updated button bindings and event listeners in `app.js`.
+- Added initial disable state for the new button.
+
+**v1.0.22**
+- Attempted fix for "Cut Logo" (`cutLogoWithModel` in `app.js`) geometry/thickness issue. Changed logic to use the original `model.geometry` directly for the CSG `modelBrush` instead of a clone, avoiding potential issues with BVH structures not being cloned.
+
+**v1.0.21**
+- Fixed position shift after "Cut Logo" (`cutLogoWithModel` in `app.js`). Instead of reapplying original local transforms after CSG, the mesh's local transforms are now reset to identity, allowing the parent group's transform (set by `matchLogoTransform`) to correctly position the resulting geometry.
+- Removed success `alert()` after the "Cut Logo" operation and replaced with console log.
+
+**v1.0.20**
+- Fixed "Cut Logo" feature (`cutLogoWithModel` in `app.js`) potentially failing to export due to `drawRange` issues from `
+
+**v1.0.19**
+- Fixed `TypeError: bad operand type for unary -: 'tuple'` in `subtract_script.py`.
+- Corrected the negation of the center point coordinates when translating the logo mesh before scaling.
+
+**v1.0.18**
+- Attempted workaround for PyVista boolean difference failure.
+- Added code in `subtract_script.py` to scale the logo mesh by 1.01x before subtraction, aiming to avoid issues potentially caused by coincident surfaces.
+
+**v1.0.17**
+- Added check in `subtract_script.py` to detect if PyVista boolean difference results in an empty mesh (0 points).
+- If the result is empty, the script now prints an error and exits with a non-zero status code, preventing the misleading `STLLoader` error in the browser and providing a clearer failure indication in the Node.js logs.
+
+**v1.0.16**
+- Attempted to fix PyVista boolean difference failure (resulting in empty mesh and STLLoader error).
+- Uncommented mesh cleaning (`.clean().extract_surface().triangulate()`) in `subtract_script.py` before the boolean operation to improve mesh quality and potentially resolve internal VTK errors.
+
+**v1.0.15**
+- Addressed `ImportError: Install IPython...` when running `subtract_script.py` with PyVista.
+- Added `ipython` dependency to `requirements.txt` as it appears to be checked by PyVista during initialization, even when disabling the Jupyter backend.
+
+**v1.0.14**
+- Implemented actual boolean subtraction (model - logo) in `subtract_script.py` using `pyvista.boolean_difference()`.
+- Replaced the previous placeholder logic that returned the original model.
+- Added `pyvista` dependency to `requirements.txt`.
+
+**v1.0.13**
+- Fixed `AttributeError: module 'stl.mesh' has no attribute 'Mode'` in `subtract_script.py`.
+- Changed save mode usage from `mesh.Mode.ASCII` to the correct `stl.Mode.ASCII` (requires importing `stl`).
+
+**v1.0.12**
+- Added Python version and path logging in `main-server.js` before executing subtraction script to help diagnose module errors.
+- Ensured the full Python script error (stderr) is logged to the Node.js console and sent in the API response details on failure.
+
+**v1.0.11**
+- Addressed Python script failure (500 Internal Server Error) during subtraction.
+- Explicitly added `numpy` to `requirements.txt` as it's a core dependency for `numpy-stl` and the subtraction script, ensuring it gets installed correctly.

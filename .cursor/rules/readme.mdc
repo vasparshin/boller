@@ -1,0 +1,110 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Modes of Work
+
+You operate in two modes:
+- **Development**: Executing planned code changes.
+- **Planning**: Proposing and structuring future changes.
+
+---
+
+## Versioning & Logs
+
+- All completed changes must be logged in `changelog.txt` using **MAJOR.MINOR.PATCH** format.
+- The **first console log** (in both browser and CLI) must show the current version and match the top entry in `changelog.txt`.
+- Never include raw logs, console output, or file/folder size info in `changelog.txt`.
+
+---
+
+## Workflow File Rules
+
+- `change_proposal.md`: Contains **planned** changes only. Do not include version numbers. Organize tasks as self-contained units that justify **minor version** updates.
+- After completing and logging a task in `changelog.txt`, remove it from `change_proposal.md`.
+- `README.md`: Only updated during **MAJOR** version changes or when explicitly instructed.
+- `directory.txt`: Must stay current and list key libraries, globals, and top-level functions.
+
+---
+
+## Development Procedure
+
+1. Read the top of `changelog.txt` to find the latest version.
+2. Review `change_proposal.md` for pending tasks.
+3. Check if the task is already implemented.
+4. If not implemented, proceed. If unclear, ask for clarification.
+5. Upon completion:
+   - Log changes in `changelog.txt` (version, summary, files).
+   - Remove the task from `change_proposal.md`.
+
+---
+
+## Planning Procedure
+
+1. Check `changelog.txt` to confirm whether the task was already completed.
+2. Check `change_proposal.md` to see if the task was already planned.
+3. If new, add to `change_proposal.md` following its format.
+
+---
+
+## Naming Conventions
+
+- Use `camelCase` for variables and functions.
+- Prefix boolean flags with `is` or `has` (e.g., `isReady`, `hasErrors`).
+- Use `UPPER_SNAKE_CASE` for constants, defined at the top of the file.
+- DOM elements: end names with their type (e.g., `logoColorSelect`, `stlDownloadButton`).
+- Feature-specific prefixes:
+  - `svg`: `svgPath`, `svgPreviewGroup`
+  - `stl`: `stlColor`, `stlThicknessInput`
+  - `logo`: `logoMesh`, `logoMaterial`
+- Prefix handlers and toggles as:
+  - `handle*` for events (e.g., `handleFileDrop`)
+  - `toggle*` for toggle actions (e.g., `toggleLogoStlVisibility`)
+
+---
+
+## Code Structure
+
+- Use comment blocks (e.g., `// --- Logo Upload ---`) to separate logic sections.
+- Group related functions by feature/module.
+- Place setup and init code at the top of each script.
+- Organize helpers/external scripts in clearly named folders.
+
+---
+
+## Logging Standards
+
+- Use proper log levels: `console.debug`, `console.info`, `console.error`.
+- Use `console.group` or `console.groupCollapsed` for grouped/verbose logs.
+- Prefix all log messages with context (e.g., `[applyLogoScale] Invalid dimensions`).
+
+---
+
+## Architecture Guidelines
+
+- Separate concerns by feature:
+  - View (3D rendering, camera)
+  - Logo (upload, transform)
+  - SVG (parse/convert to mesh)
+  - STL (extrude, export)
+  - Server (API endpoints, Python integration)
+- Avoid tight coupling and circular dependencies.
+- Use events/interfaces for cross-module interaction.
+
+---
+
+## State & DOM Sync
+
+- Minimize global variables and document any that remain.
+- Use events to update the DOM based on internal state changes.
+- Ensure the UI reflects the most recent internal state.
+
+---
+
+## Error Handling
+
+- Use `try/catch` or pre-validation for all user inputs and external calls.
+- Do not use `alert()`. Prefer UI feedback or console logs.
+- All errors must include contextual logs for debugging.
+

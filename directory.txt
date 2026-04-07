@@ -1,0 +1,220 @@
+# Project Directory: app.js Analysis
+
+This document provides a detailed explanation of variables, primary functions, and libraries used in `app.js`. The goal is to guide future code cleanup, identify redundancies, and understand dependencies.
+
+## Versioning Note (July 29, 2024)
+Project versioning details (past/current history) are maintained solely in the `README.md` Changelog. Future work proposals are organized by phase in `change_proposal.md`.
+
+## Libraries Used
+
+1.  **three** (`import * as THREE from 'three';`)
+    *   **Purpose:** The core 3D graphics library. Used for creating scenes, cameras, lighting, materials, geometries, rendering the 3D view, and handling 3D objects (models, logos).
+    *   **Criticality:** **Critical**. The entire application revolves around 3D visualization and manipulation provided by Three.js.
+
+2.  **three/addons/controls/OrbitControls.js** (`import { OrbitControls } ...`)
+    *   **Purpose:** Provides camera controls allowing users to orbit, pan, and zoom the 3D view using the mouse.
+    *   **Criticality:** **Critical** for user interaction with the 3D scene. While other control schemes exist, this is essential for the current navigation method.
+
+3.  **three/addons/loaders/STLLoader.js** (`import { STLLoader } ...`)
+    *   **Purpose:** Loads 3D models from `.stl` files, which is the primary format used for the base models.
+    *   **Criticality:** **Critical** for loading the customizable 3D models.
+
+4.  **three/addons/geometries/DecalGeometry.js** (`import { DecalGeometry } ...`)
+    *   **Purpose:** Used to project the logo (as a texture) onto the surface of the 3D model, creating a decal effect.
+    *   **Criticality:** **Critical** for the core functionality of placing logos onto models.
+
+5.  **three/addons/exporters/STLExporter.js** (`import { STLExporter } ...`)
+    *   **Purpose:** Exports the final customized 3D scene (model with logo applied, potentially modified geometry) back into an `.stl` file for saving or further use.
+    *   **Criticality:** **Critical** for the "save model" functionality.
+
+6.  **three/addons/utils/BufferGeometryUtils.js** (`import * as BufferGeometryUtils ...`)
+    *   **Purpose:** Provides utility functions for working with Three.js BufferGeometry. Specifically noted in comments as used for a repair function, likely involving merging or cleaning geometry data. Also used in `cutLogoWithModel`.
+    *   **Criticality:** **High**. Seems essential for geometry manipulation features like model repair and potentially the CSG operations (cutting/intersecting).
+
+7.  **three-mesh-bvh** (`import * as ThreeMeshBVH ...`)
+    *   **Purpose:** Implements Bounding Volume Hierarchy (BVH) acceleration structures for Three.js meshes. This significantly speeds up spatial queries like raycasting (used for placing decals) and collision detection. Likely also used by `three-bvh-csg`.
+    *   **Criticality:** **Critical** for performance, especially raycasting for decal placement and potentially for CSG operations. The application might be too slow without it.
+
+8.  **three-bvh-csg** (`import * as ThreeBVHCSG ...`)
+    *   **Purpose:** Performs Constructive Solid Geometry (CSG) operations (union, subtraction, intersection) on Three.js meshes, accelerated by BVH. Used for the "Cut Logo" (intersect) and "Cutout Logo" (subtract) features.
+    *   **Criticality:** **Critical** for the logo cutting/subtraction features.
+
+9.  **chroma-js** (Assumed global via script tag)
+    *   **Purpose:** Library for color conversions and manipulation. Used in `populateColorSelectors` to determine text color (black/white) based on the background color swatch for better readability.
+    *   **Criticality:** **Low**. Used for a minor UI enhancement (color swatch text contrast). Could be replaced with simpler logic or removed with minimal impact on core functionality.
+
+10. **jQuery** (Assumed global via script tag)
+    *   **Purpose:** General-purpose JavaScript library for DOM manipulation, event handling, and AJAX. **Update:** Event listeners in `app.js` (`setupEventListeners`) have been converted to vanilla JS (`element.addEventListener`). Remaining usage might be in other DOM manipulation sections of `app.js`, within `js/SVGtoSTL.js`, or directly in `index.html`.
+    *   **Criticality:** **Medium/Low**. Modern JavaScript (Vanilla JS) can replace most common jQuery uses. Its removal would require rewriting any remaining portions of the event handling and DOM manipulation code but wouldn't necessarily break core 3D logic if done carefully. Likely not critical, but removing it fully would be a significant refactoring effort.
+
+11. **D3.js** (Assumed global via script tag)
+    *   **Purpose:** Data visualization library. Its specific use isn't immediately apparent from the `app.js` imports or initial functions. It might be used for UI elements, specific calculations, or potentially SVG manipulation related to the SVG-to-STL feature.
+    *   **Criticality:** **Unknown/Low?** Without seeing its direct usage, it's hard to judge. If only used for minor UI elements or calculations easily done otherwise, it might not be critical. If deeply integrated into the SVG processing or other complex logic, it could be harder to remove. Needs further investigation.
+
+12. **FileSaver.js** (`saveAs`) (Assumed global via script tag, previously imported)
+    *   **Purpose:** Provides the `saveAs` function to trigger file downloads in the browser. Used for downloading the exported STL model and potentially other files.
+    *   **Criticality:** **High**. Essential for allowing users to save the generated STL files directly from the browser. While alternatives exist, this is a standard way to handle client-side file saving.
+
+## Global Variables
+
+### Constants
+*   `PALETTE`: Array of color objects (`{name, value}`) used to populate color selection dropdowns.
+
+### DOM Element References
+*   `viewerContainer`: The `div` element where the Three.js canvas is rendered.
+*   `logoUploadInput`: The `<input type="file">` for uploading logo images/SVGs.
+*   `logoColorSelect`: The `<select>` dropdown for choosing the logo decal color.
+*   `logoScaleInput`: The `<input type="range">` for adjusting the logo size.
+*   `moveUp/Down/Left/RightLg/SmBtn`: Buttons for moving the logo in large or small increments.
+*   `modelColorSelect`: The `<select>` dropdown for choosing the base model color.
+*   `modelSelect`: The `<select>` dropdown for choosing the base model file.
+*   `quantityInput`: The `<input type="number">` for specifying the quantity.
+*   `currencySelect`: The `<select>` dropdown for choosing the currency.
+*   `unitPriceSpan`: The `<span>` displaying the calculated unit price.
+*   `totalPriceSpan`: The `<span>` displaying the calculated total price.
+*   `saveModelBtn`: The button to trigger saving the final model (renamed, might correspond to `downloadCurrentModelBtn` logic now).
+*   `previewLogoBtn`: Button to trigger the preview of the uploaded logo file (image or SVG).
+*   `doubleSidedCheckbox`: Checkbox to toggle if the logo decal should appear on both sides of a mesh face.
+*   `toggleBBoxBtn`: Button to toggle the visibility of the main model's bounding box.
+*   `toggleLogoBBoxBtn`: Button to toggle the visibility of the logo decal's bounding box.
+*   `togglePlacementAreaBtn`: Button to toggle the visibility of the designated logo placement area helper.
+*   `centerLogoBtn`: Button to attempt to center the logo within the placement area.
+*   `toggleStlBboxBtn`: Button to toggle the visibility of the generated logo STL's bounding box.
+*   `toggleLogoStlVisibilityBtn`: Button to toggle the visibility of the generated logo STL mesh.
+*   `toggleLogoDecalVisibilityBtn`: Button to toggle the visibility of the logo decal mesh.
+*   `stlThicknessInput`: Input for setting the thickness of the extruded logo STL.
+*   `stlColorSelect`: Dropdown for selecting the color of the generated logo STL mesh.
+*   `mirrorStlCheckbox`: Checkbox to mirror the generated logo STL.
+*   `cutLogoBtn`: Button to perform an intersection CSG operation between the logo STL and the model.
+*   `cutoutLogoBtn`: Button to perform a subtraction CSG operation (logo STL from model).
+*   `repairStlBtn`: Button to trigger a server-side STL repair process.
+*   `downloadCurrentModelBtn`: Button to download the current state of the model as an STL file.
+
+### Three.js Core Components
+*   `scene`: The container for all 3D objects, lights, and cameras.
+*   `camera`: The perspective camera defining the viewpoint into the scene.
+*   `renderer`: The WebGL renderer responsible for drawing the scene onto the canvas.
+*   `controls`: The `OrbitControls` instance for camera manipulation.
+*   `loader`: The `STLLoader` instance used to load base models.
+*   `raycaster`: Used to detect intersections between mouse clicks (rays) and objects in the scene, primarily for placing decals.
+*   `mouse`: A `THREE.Vector2` storing normalized mouse coordinates for raycasting.
+
+### Model and Logo Objects
+*   `model`: The `THREE.Mesh` or `THREE.Group` representing the currently loaded base 3D model.
+*   `logoMesh`: The `THREE.Mesh` representing the logo decal projected onto the model.
+*   `logoMaterial`: The `THREE.Material` (likely `MeshPhongMaterial` or `MeshStandardMaterial` initially, then potentially `MeshBasicMaterial` or similar for decals) used for the logo decal.
+*   `mirroredLogoMesh`: A `THREE.Mesh` representing the mirrored version of the logo decal (for double-sided). Null if not double-sided or no logo loaded.
+*   `logoTexture`: The `THREE.Texture` created from the uploaded logo image, used by `logoMaterial`. Null if no image logo is loaded.
+*   `bboxHelper`: A `THREE.BoxHelper` visualizing the bounding box of the `model`. Null if not visible.
+*   `logoBBoxHelper`: A `THREE.BoxHelper` visualizing the bounding box of the `logoMesh`. Null if not visible.
+*   `logoStlBboxHelper`: A `THREE.BoxHelper` visualizing the bounding box of the `svgToStlGroup`. Null if not visible.
+*   `placementAreaHelper`: A `THREE.Mesh` (likely a semi-transparent box) visualizing the allowed area for logo placement. Null if not visible.
+*   `axesHelper`: A `THREE.AxesHelper` to show the X, Y, Z axes (useful for debugging). Null if not added or removed.
+
+### State Variables
+*   `selectedLogoFile`: Stores the `File` object selected via `logoUploadInput` before it's processed.
+*   `loadedLogoImage`: Stores the `Image` object once a logo image is successfully loaded and validated.
+*   `animationId`: Stores the ID returned by `requestAnimationFrame`, used to cancel the animation loop if needed.
+*   `isRotating`: Boolean flag, potentially for automatic model rotation (though usage seems limited/removed based on `rotationSpeed`).
+*   `rotationSpeed`: Number controlling the speed of automatic rotation (currently seems unused/set to 0).
+*   `modelLoaded`: Boolean flag indicating whether the base model has finished loading.
+*   `lastPlacementPoint`: `THREE.Vector3` storing the intersection point where the last decal was placed.
+*   `lastPlacementNormal`: `THREE.Vector3` storing the surface normal at the point where the last decal was placed.
+
+### SVG-to-STL Variables
+*   `svgToStlGroup`: A `THREE.Group` containing the mesh(es) generated from an SVG file.
+*   `svgFileName`: String storing the name of the currently processed SVG file.
+*   `svgPaths`: Array potentially storing parsed path data from an SVG file (usage needs confirmation).
+
+## Primary Functions
+
+*   **`init()`**:
+    *   **Purpose:** The main initialization function called on page load.
+    *   **Actions:** Calls other setup functions (`bindDOMElements`, `setupThreeJS`, `populateColorSelectors`, `setupEventListeners`, `fetchAndPopulateModels`), updates the initial price display, and starts the animation loop (`animate`).
+
+*   **`bindDOMElements()`**:
+    *   **Purpose:** Gets references to all necessary HTML elements using their IDs and stores them in the global variables defined above.
+    *   **Actions:** Uses `document.getElementById` for all control inputs, buttons, display areas, and the viewer container. Includes basic error checking for essential elements. Sets initial properties for `logoScaleInput`.
+
+*   **`setupThreeJS()`**:
+    *   **Purpose:** Initializes the core Three.js components (scene, camera, renderer, lights, controls, loader, raycaster).
+    *   **Actions:** Creates `THREE.Scene`, `THREE.PerspectiveCamera`, `THREE.WebGLRenderer`, adds ambient and directional lights, initializes `OrbitControls`, `STLLoader`, `THREE.Raycaster`, `THREE.Vector2` for the mouse. Sets up the initial camera position and renderer size. Adds the `svgToStlGroup` to the scene. Attaches the resize listener.
+
+*   **`onWindowResize()`**:
+    *   **Purpose:** Handles browser window resize events.
+    *   **Actions:** Updates the camera's aspect ratio and projection matrix, and resizes the WebGL renderer to fit the `viewerContainer`.
+
+*   **`populateColorSelectors()`**:
+    *   **Purpose:** Populates the `modelColorSelect`, `logoColorSelect`, and `stlColorSelect` dropdowns with options based on the `PALETTE` constant.
+    *   **Actions:** Iterates through `PALETTE`, creates `<option>` elements, sets their value and text, styles the background color, and uses `chroma-js` to set contrasting text color. Sets default selected colors.
+
+*   **`fetchAndPopulateModels()`**:
+    *   **Purpose:** Fetches the list of available model filenames from the backend API (`/api/models`).
+    *   **Actions:** Uses `fetch` to make the API call. Parses the JSON response. Clears existing options in `modelSelect`. Populates `modelSelect` with new options based on the fetched filenames. Calls `loadModel` to load the first model in the list by default.
+
+*   **`loadModel(filename)`**:
+    *   **Purpose:** Loads a specific STL model file into the scene.
+    *   **Actions:** Removes any existing model. Uses the `STLLoader` to load the file from `/models/{filename}`. Creates a `THREE.MeshPhongMaterial` (using the color from `modelColorSelect`). Creates a `THREE.Mesh` using the loaded geometry and material. Applies BVH optimization (`computeBoundsTree`). Adds the model to the scene. Centers the camera view on the loaded model. Sets `modelLoaded` flag. Removes helpers (like bounding boxes). Updates placement area visualization.
+
+*   **`handleLogoSelection(event)`**:
+    *   **Purpose:** Handles the file selection event from `logoUploadInput`.
+    *   **Actions:** Stores the selected file in `selectedLogoFile`. Resets logo state (`resetLogoState`). Calls `uploadAndPreviewLogo`.
+
+*   **`resetLogoState()`**:
+    *   **Purpose:** Clears existing logo-related objects and state.
+    *   **Actions:** Removes `logoMesh`, `mirroredLogoMesh`, `svgToStlGroup` children. Removes helpers (`logoBBoxHelper`, `logoStlBboxHelper`). Resets associated variables (`loadedLogoImage`, `logoTexture`, `lastPlacementPoint`, etc.).
+
+*   **`uploadAndPreviewLogo()`**:
+    *   **Purpose:** Reads the selected logo file (`selectedLogoFile`) and initiates either image processing (`visualizeLogo`) or SVG processing (`convertAndMatchLogoStl`) based on file type.
+    *   **Actions:** Uses `FileReader` to read the file. Checks the file type (`.svg` vs. image). If image, creates an `Image` object, sets its `src`, and calls `visualizeLogo` on load. If SVG, reads as text and calls `convertAndMatchLogoStl`. Handles errors.
+
+*   **`visualizeLogo()`**: (Called after image load)
+    *   **Purpose:** Processes the loaded logo image (`loadedLogoImage`) to prepare it for use as a decal texture. Creates the initial decal mesh.
+    *   **Actions:** Performs color checks (`checkLogoColors`). Creates a `THREE.CanvasTexture` from the image. Creates the `logoMaterial` (initially `MeshPhongMaterial` with the texture map). Creates an initial placeholder `logoMesh` (often a small plane or based on `DecalGeometry` with default parameters) but doesn't necessarily place it correctly yet; placement happens on click/interaction. Adds helpers. Calls `showLogo` which likely handles the actual placement logic.
+
+*   **`showLogo()`**: (Complex function, likely handles decal placement/update)
+    *   **Purpose:** Creates or updates the `logoMesh` using `DecalGeometry` based on mouse interaction or stored placement data.
+    *   **Actions:** Uses `raycaster` to find the intersection point and normal on the base `model` from mouse coordinates (or uses `lastPlacementPoint`/`lastPlacementNormal`). Defines decal orientation and size (based on `logoScaleInput`). Creates `DecalGeometry`. Updates `logoMesh` with the new geometry and existing `logoMaterial`. Adds/updates `mirroredLogoMesh` if `doubleSidedCheckbox` is checked. Updates bounding box helpers.
+
+*   **`setupEventListeners()`**:
+    *   **Purpose:** Attaches event listeners to all interactive DOM elements.
+    *   **Actions:** Adds listeners for clicks (`click`), input changes (`input`, `change`) to buttons, selects, inputs, checkboxes. Connects UI elements to their corresponding functions (e.g., `modelSelect` -> `loadModel`, `logoScaleInput` -> `handleLogoScaleChange`, movement buttons -> `applyLogoMove`, `previewLogoBtn` -> `uploadAndPreviewLogo`, etc.). Includes listeners for raycasting (`pointerdown`, `pointermove`).
+
+*   **`applyLogoMove(axis, step)`**:
+    *   **Purpose:** Moves the existing logo decal along a specified axis ('x', 'y', 'z') by a given step amount.
+    *   **Actions:** Modifies the `logoMesh.position` (and `mirroredLogoMesh.position`). Needs careful implementation as decals are projected; might involve re-projecting or manipulating the underlying decal geometry's position/orientation reference. May re-call parts of `showLogo` logic to update the decal projection based on the new position.
+
+*   **`updatePrice()`**:
+    *   **Purpose:** Calculates and displays the unit and total price based on selected model, quantity, and currency.
+    *   **Actions:** Reads values from `modelSelect`, `quantityInput`, `currencySelect`. Fetches price data (likely requires an API call or predefined price list, not fully shown). Performs calculation. Updates `unitPriceSpan` and `totalPriceSpan`.
+
+*   **`animate()`**:
+    *   **Purpose:** The main render loop.
+    *   **Actions:** Uses `requestAnimationFrame` to continuously call itself. Updates `OrbitControls` (`controls.update()`). Renders the `scene` using the `renderer`. This function keeps the 3D view interactive and updated.
+
+*   **`convertSvgToStl()`**: (Likely called by `convertAndMatchLogoStl`)
+    *   **Purpose:** Converts parsed SVG data into a 3D mesh (extruded).
+    *   **Actions:** Uses Three.js geometry generators (like `ShapeGeometry`, `ExtrudeGeometry`) based on `svgPaths`. Creates a `THREE.Mesh` with appropriate material (`stlColorSelect`) and thickness (`stlThicknessInput`). Adds the result to `svgToStlGroup`. Handles mirroring (`mirrorStlCheckbox`).
+
+*   **`convertAndMatchLogoStl()`**: (Called for SVG upload)
+    *   **Purpose:** Orchestrates the SVG to STL conversion and positions/scales the resulting STL mesh to match the decal placement/scale.
+    *   **Actions:** Calls `resetStlGroup`. Parses the SVG data (details likely in helper functions). Calls `convertSvgToStl`. Calls `matchLogoTransform` to align the generated STL with the current decal position/orientation/scale.
+
+*   **`matchLogoTransform()`**:
+    *   **Purpose:** Aligns the `svgToStlGroup` (generated logo STL) transformation (position, rotation, scale) to match the `logoMesh` (decal).
+    *   **Actions:** Copies position, rotation, and potentially adjusts scale from `logoMesh` or related placement data (`lastPlacementPoint`, `lastPlacementNormal`) to `svgToStlGroup`. Updates helpers.
+
+*   **`cutLogoWithModel()` / `cutoutLogoFromModel()`**:
+    *   **Purpose:** Performs CSG operations (intersection/subtraction) between the generated logo STL (`svgToStlGroup`) and the base model (`model`). `cutoutLogoFromModel` currently includes both client-side (`three-bvh-csg`) and server-side (`/api/subtract-stl-scripted` -> Python/Trimesh) subtraction attempts.
+    *   **Actions:** 
+        *   Client-side: Uses the `three-bvh-csg` library. Prepares meshes (ensuring they are watertight, have BVH). Performs the CSG operation (`intersect` or `subtract`). Updates the `model`'s geometry with the result. Handles potential errors and performance considerations.
+        *   Server-side (`cutoutLogoFromModel`): Exports model and logo STLs. Uses `fetch` to POST data to `/api/subtract-stl-scripted`. Node.js server calls a Python script (e.g., `subtract_script.py`) which uses the Trimesh library to perform the subtraction. Receives the subtracted STL data back. Parses the result and updates the `model`'s geometry.
+    *   **Known Issues:** The server-side subtraction (`/api/subtract-stl-scripted`) is currently experiencing intermittent `500 Internal Server Error` failures originating from the Python/Trimesh script. This requires further investigation into server-side logs and potential resource/geometry issues.
+
+*   **`downloadCurrentModel()`**:
+    *   **Purpose:** Exports the current state of the main `model` (potentially modified by CSG operations) as an STL file.
+    *   **Actions:** Creates an `STLExporter` instance. Calls `exporter.parse(model)` to get the STL data. Uses `saveAs` (from FileSaver.js) to trigger the download in the browser with an appropriate filename.
+
+*   **`repairStl()`**:
+    *   **Purpose:** Sends the current model's geometry data (likely as STL) to a backend API endpoint (`/api/repair`) for mesh repair (e.g., fixing holes, non-manifold edges).
+    *   **Actions:** Exports the `model` to STL format (in memory). Uses `fetch` to POST the STL data to the backend. Receives the repaired STL data back. Parses the repaired STL data and updates the `model`'s geometry. Handles API communication and potential errors. 

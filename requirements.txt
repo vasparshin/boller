@@ -1,0 +1,8 @@
+numpy>=1.18
+numpy-stl>=2.9
+pyvista>=0.38 # Needed for repair_script.py
+ipython>=7.0 # Needed by pyvista
+trimesh>=3.0 # Added for boolean subtraction
+scipy>=1.0 # Often needed by trimesh
+# Flask>=2.0 # No longer needed
+# Flask-CORS>=3.0 # No longer needed 
