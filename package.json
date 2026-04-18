@@ -1,0 +1,20 @@
+{
+  "name": "boller3d",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@mlightcad/libredwg-web": "^0.1.5",
+    "body-parser": "^2.2.0",
+    "dxf": "^5.2.0",
+    "express": "^5.1.0",
+    "nodemon": "^3.1.9",
+    "three-bvh-csg": "^0.0.17"
+  }
+}

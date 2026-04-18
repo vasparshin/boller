@@ -1,0 +1,252 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>3D Model Customizer</title><link rel="stylesheet" href="styles.css">
+
+<!-- Import Map: Tells browser where to find modules -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/",
+    "three-mesh-bvh": "https://unpkg.com/three-mesh-bvh@0.6.8/build/index.module.js",
+    "three-bvh-csg": "https://unpkg.com/three-bvh-csg@0.0.17/build/index.module.js"
+  }
+}
+</script>
+
+<!-- jQuery library -->
+<!-- <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script> REMOVED in v1.0.63 -->
+<!-- D3.js library - required for SVG path transformation -->
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<!-- Chroma.js -->
+<!-- <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js"></script> REMOVED in v1.0.61 -->
+<!-- SVG to STL Libraries (Keep these as regular scripts) -->
+<script src="js/external/d3-threeD.js"></script>
+<script src="js/external/flatten.js"></script>
+<script src="js/external/FileSaver.js"></script>
+
+<!-- Load our custom SimpleBooleanCSG library -->
+<script src="js/libs/SimpleBooleanCSG.js"></script>
+
+<!-- Load DXF parser library for DXF/DWG file support -->
+<script src="node_modules/dxf/dist/dxf.js"></script>
+
+<!-- Add BufferGeometryUtils for mergeVertices to work -->
+<script type="module">
+  // Version 2.1.0 - Fixed for nested contours and artifacts
+  import * as THREE from 'three';
+  import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
+  import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+  
+  // Ensure BufferGeometryUtils has the functions we need
+  if (!BufferGeometryUtils.mergeVertices) {
+    console.error("[CRITICAL] BufferGeometryUtils.mergeVertices not found!");
+  }
+  
+  if (!BufferGeometryUtils.mergeGeometries) {
+    console.error("[CRITICAL] BufferGeometryUtils.mergeGeometries not found!");
+  }
+  
+  // Make THREE and utilities globally available
+  window.THREE = THREE;
+  window.BufferGeometryUtils = BufferGeometryUtils;
+  window.STLExporter = STLExporter;
+  
+  // Log version info when THREE is definitely available
+  console.log(`[Main] Using THREE.js version: ${THREE.REVISION}`);
+  console.log('[Main] Loaded BufferGeometryUtils and STLExporter');
+  
+  // Once utilities are loaded, load SVGtoSTL.js
+  const script = document.createElement('script');
+  script.src = 'js/SVGtoSTL.js?v=' + new Date().getTime(); // Add timestamp to prevent caching
+  document.head.appendChild(script);
+</script>
+<!-- Moved SVGtoSTL.js to be loaded dynamically after BufferGeometryUtils -->
+<!-- Earcut (Keep as regular script if SVGtoSTL depends on global earcut) -->
+<!-- <script src="https://unpkg.com/earcut@2.2.4/dist/earcut.min.js"></script> -->
+
+<!-- Load app.js as a module AFTER other scripts BUT before body close -->
+<!-- The module script will still execute after DOM parsing -->
+<!-- And window.THREE = THREE assignment within it should make THREE global -->
+<script type="module" src="app.js"></script>
+
+</head><body>
+<div class="container">
+    <h1>3D Model Customizer</h1>
+
+    <div class="main-content-wrapper">
+        <div id="viewer-container"></div> <!-- Container for the 3D view -->
+
+        <div class="controls">
+            <!-- <h2>Controls</h2> -->
+
+            <div class="control-group">
+                <!-- <label>Upload Logo:</label> REMOVED -->
+                <div class="upload-container" style="margin-top: 8px;">
+                    <input type="file" id="logo-upload" accept=".svg,.dxf,.dwg"/>
+                    <button id="preview-logo-btn" disabled>Preview Logo</button>
+                </div>
+            </div>
+
+            <div class="control-group inline-control">
+                <label for="model-select">Select Model:</label>
+                <select id="model-select">
+                    <option disabled selected>Loading models...</option>
+                </select>
+            </div>
+
+            <!-- Group Color Selectors Horizontally -->
+            <div class="control-group color-selector-group">
+                <!-- <label>Colors:</label> REMOVED --> 
+                <div class="color-selectors-horizontal">
+                    <div class="color-item">
+                        <label for="model-color" class="color-item-label">Model:</label>
+                        <select id="model-color"></select>
+                    </div>
+                    <div class="color-item">
+                        <label for="logo-color" class="color-item-label">Logo Decal:</label>
+                        <select id="logo-color"></select>
+                    </div>
+                    <div class="color-item">
+                        <label for="stl-color" class="color-item-label">Logo STL:</label>
+                        <select id="stl-color"></select>
+                    </div>
+                    <div class="color-item">
+                        <label for="overlap-color" class="color-item-label">Overlap:</label>
+                        <select id="overlap-color"></select>
+                    </div>
+                    <div class="color-item">
+                        <label for="final-logo-color" class="color-item-label">Final Logo:</label>
+                        <select id="final-logo-color"></select>
+                    </div>
+                </div>
+            </div>
+            <!-- End Group Color Selectors -->
+
+            <div class="control-group">
+                <label>Logo Scale:</label>
+                <div class="scale-container">
+                    <input type="range" id="logo-scale" min="1.0" max="1.7" step="0.1" value="1.0">
+                </div>
+            </div>
+
+            <div class="control-group">
+                <label>Logo Position:</label>
+                <div class="logo-move-controls">
+                    <button id="move-up-lg" title="Move Up (Large)">↑↑</button>
+                    <button id="move-up-sm" title="Move Up (Small)">↑</button>
+                    <div class="center-row">
+                        <button id="move-left-lg" title="Move Left (Large)">←←</button>
+                        <button id="move-left-sm" title="Move Left (Small)">←</button>
+                        <button id="center-logo-btn">Center</button>
+                        <button id="move-right-sm" title="Move Right (Small)">→</button>
+                        <button id="move-right-lg" title="Move Right (Large)">→→</button>
+                    </div>
+                    <button id="move-down-sm" title="Move Down (Small)">↓</button>
+                    <button id="move-down-lg" title="Move Down (Large)">↓↓</button>
+                </div>
+            </div>
+
+            <div class="control-group">
+                <!-- <label>Options:</label> REMOVED -->
+                <div class="checkbox-container">
+                    <input type="checkbox" id="double-sided-logo"/>
+                    <label for="double-sided-logo">Double-Sided Logo</label>
+                </div>
+            </div>
+
+            <div class="control-group inline-control">
+                <label for="quantity">Quantity:</label>
+                <input type="number" id="quantity" min="10" max="200" value="10">
+            </div>
+
+            <div class="control-group inline-control">
+                <label for="currency">Currency:</label>
+                <select id="currency">
+                    <option value="GBP">GBP (£)</option>
+                    <option value="USD">USD ($)</option>
+                    <option value="EUR">EUR (€)</option>
+                </select>
+            </div>
+
+            <div class="price-info">
+                <p>Unit Price: <span id="unit-price">£10.00</span></p>
+                <p>Total Price: <span id="total-price">£10.00</span></p>
+            </div>
+
+            <div class="control-group">
+                <!-- <label>View Controls:</label> REMOVED -->
+                <details class="advanced-options-dropdown">
+                    <summary>Advanced View Options</summary>
+                    <div class="advanced-option-section">
+                        <h4>Boundary Boxes</h4>
+                        <div class="button-group view-controls-grid">
+                            <button id="toggle-bbox">Toggle Model BBox</button>
+                            <button id="toggle-logo-bbox">Toggle Logo BBox</button>
+                            <button id="toggle-placement-area">Toggle Logo Placement BBox</button>
+                            <button id="toggle-stl-bbox-btn">Toggle Logo STL BBox</button>
+                            <button id="toggle-overlap-bbox-btn">Toggle Overlap BBox</button>
+                        </div>
+                    </div>
+                    <div class="advanced-option-section">
+                        <h4>Models Toggles</h4>
+                        <div class="button-group view-controls-grid">
+                            <button id="toggle-model-btn">Toggle Model</button>
+                            <button id="toggle-logo-decal-visibility-btn">Toggle Logo Decal</button>
+                            <button id="toggle-logo-stl-visibility-btn">Toggle Logo STL</button>
+                            <button id="toggle-overlap-btn">Toggle Overlap</button>
+                            <button id="toggle-final-logo-stl-btn">Toggle Final Logo STL</button>
+                        </div>
+                    </div>
+                    <div class="advanced-option-section">
+                        <h4>Debug Console</h4>
+                        <div class="button-group view-controls-grid">
+                            <button id="toggle-axis-helper-btn">Toggle Axis Helper</button>
+                            <button id="debug-boundary-btn">Debug Boundaries</button>
+                            <button id="debug-models-btn">Debug Models</button>
+                        </div>
+                    </div>
+                </details>
+            </div>
+            
+            <!-- Add NEW Unified Download Button Here -->
+            <div class="control-group download-section">
+                 <button id="download-model-stl-btn" class="action-button" disabled>Download All Models</button>
+                 <!-- Add Repair Base Model Button -->
+                 <button id="repair-base-model-btn" class="action-button" disabled>Repair Base Model</button>
+                 <!-- Add Reload Model Button -->
+                 <button id="reload-model-btn" class="action-button" disabled>Reload Model</button>
+            </div>
+            
+        </div> <!-- End div.controls -->
+    </div> <!-- End main-content-wrapper -->
+
+    <!-- MOVE SVG CONTROLS HERE: Inside .container, After .main-content-wrapper -->
+    <div class="svg-to-stl-wrapper">
+        <h2>SVG to STL Converter</h2>
+        
+        <div class="control-group">
+                <div class="options-group">
+                        <label for="stl-thickness">Thickness (mm):</label>
+                        <input type="number" id="stl-thickness" value="10.0" step="0.1">
+                        <br>
+                        <label for="logo-thickness-delta">Logo Thickness Delta (mm):</label>
+                        <input type="number" id="logo-thickness-delta" value="1.0" step="0.1" min="0" max="10.0">
+                        <br>
+                        <label for="curve-segments">Precision:</label>
+                        <input type="number" id="curve-segments" min="20" max="400" value="200"/>
+                </div>
+                <div class="svg-to-stl-buttons">
+                        <button id="logo-stl-btn">Logo STL</button>
+                        <button id="repair-stl-btn">Repair STL</button>
+                        <button id="find-overlap-btn">Find Overlap</button>
+                        <button id="make-final-logo-stl-btn">Make Final Logo STL</button>
+                </div>
+                <div class="svg-to-stl-buttons" style="margin-top: 10px;">
+                        <button id="make-3d-logo-btn">Make 3D Logo</button>
+                        <button id="mirror-logo-btn">Mirror Logo</button>
+                </div>
+        </div>
+    </div> <!-- End svg-to-stl-wrapper -->
+
+</div> <!-- End .container -->
+
+</body></html>

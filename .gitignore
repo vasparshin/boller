@@ -1,0 +1,20 @@
+node_modules/
+# Vendored copies with nested .git — use npm install for three-bvh-csg
+three-bvh-csg/
+three-mesh-bvh/
+# Local / scratch (do not publish)
+test_*.stl
+test_intersection.stl
+change_proposal.md
+temp_intersect/
+temp_repair/
+temp_subtract/
+__pycache__/
+*.pyc
+.Python
+.env
+.venv/
+venv/
+*.log
+.DS_Store
+Thumbs.db
