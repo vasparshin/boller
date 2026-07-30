@@ -14,8 +14,26 @@ def heal_mesh(mesh_trimesh, operation_name=""):
     print(f"[Heal Mesh] Healing '{operation_name}'. Faces: {len(mesh_trimesh.faces)}")
     try:
         meshfix = MeshFix(mesh_trimesh.vertices, mesh_trimesh.faces)
-        meshfix.repair(verbose=False)
-        healed_mesh = trimesh.Trimesh(vertices=meshfix.v, faces=meshfix.f)
+        # NOTE: pymeshfix>=0.17 removed the `verbose` kwarg from MeshFix.repair().
+        # Calling with verbose=False raised "unexpected keyword argument 'verbose'"
+        # on newer pymeshfix, which silently disabled ALL mesh healing (caught by
+        # the except below) -- a likely contributor to the corrupted/missing-geometry
+        # bug, since the model and logo meshes were never actually being repaired
+        # before the boolean operation ran. Confirmed via `inspect.signature`
+        # against the installed pymeshfix 0.18.1.
+        meshfix.repair()
+        # NOTE: pymeshfix>=0.17 renamed MeshFix's result attributes from
+        # `.v`/`.f` to `.points`/`.faces`. Using the old names raised
+        # "'MeshFix' object has no attribute 'v'" on pymeshfix 0.18.1, which
+        # this except block was silently swallowing -- so even after fixing
+        # the `verbose` kwarg above, the FINAL post-boolean healing pass was
+        # still a no-op. Support both so this keeps working across versions.
+        healed_vertices = getattr(meshfix, 'points', None)
+        healed_faces = getattr(meshfix, 'faces', None)
+        if healed_vertices is None or healed_faces is None:
+            healed_vertices = meshfix.v
+            healed_faces = meshfix.f
+        healed_mesh = trimesh.Trimesh(vertices=healed_vertices, faces=healed_faces)
         print(f"[Heal Mesh] Healing for '{operation_name}' complete. Faces: {len(healed_mesh.faces)}")
         return healed_mesh
     except Exception as e:

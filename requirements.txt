@@ -4,5 +4,13 @@ pyvista>=0.38 # Needed for repair_script.py
 ipython>=7.0 # Needed by pyvista
 trimesh>=3.0 # Added for boolean subtraction
 scipy>=1.0 # Often needed by trimesh
+pymeshfix>=0.17 # Used by subtract_script.py's heal_mesh() -- was missing from
+                 # requirements.txt entirely despite being a hard runtime import;
+                 # any environment that ends up with an OLDER pymeshfix (<0.17,
+                 # which still accepted MeshFix.repair(verbose=...)) is fine, but
+                 # this file previously gave no signal that pymeshfix was needed
+                 # at all, so a fresh/rebuilt environment could easily end up
+                 # missing it or drift to an incompatible version. Pin/track it
+                 # explicitly so mesh healing doesn't silently no-op again.
 # Flask>=2.0 # No longer needed
 # Flask-CORS>=3.0 # No longer needed 

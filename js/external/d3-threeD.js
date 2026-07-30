@@ -33,6 +33,23 @@ function d3threeD(exports) {
                   continue;
               }
               else if (c === PERIOD) {
+                  // BUGFIX (2026-07-30): a second '.' means this is the START of
+                  // the NEXT number, not a continuation of the current one. SVG
+                  // path data commonly omits the separator before a number that
+                  // starts with '.' (e.g. "...7.99.63..." means the two numbers
+                  // -7.99 and .63 run together). The original code kept eating
+                  // digits across the second '.', producing a garbled token
+                  // (e.g. "7.99.63") whose parseFloat() silently truncates to
+                  // 7.99 while `idx` has already skipped past where the next
+                  // number actually starts -- desyncing all subsequent
+                  // coordinate parsing for the rest of the path and eventually
+                  // yielding NaN vertices (verified: this SVG path desync is
+                  // what produced NaN points feeding THREE.ExtrudeGeometry,
+                  // which is unrecoverable corrupted geometry downstream).
+                  if (isFloat) {
+                      s = pathStr.substring(sidx, idx);
+                      return parseFloat(s);
+                  }
                   idx++;
                   isFloat = true;
                   continue;
@@ -53,7 +70,14 @@ function d3threeD(exports) {
               idx++;
           }
           c = pathStr.charCodeAt(idx);
-          return (c === MINUS || (DIGIT_0 <= c && c <= DIGIT_9));
+          // BUGFIX (2026-07-30): a number can validly start with '.' (e.g. ".63"),
+          // including the run-together case this file's eatNum() now correctly
+          // splits on (see eatNum). Without this, leaving idx pointed at an
+          // unconsumed '.' made nextIsNum() wrongly report "no more numbers",
+          // which desynced the command-repeat state machine into an infinite
+          // loop (activeCmd stuck on '.', which hits the default no-op case
+          // forever since nothing ever advances idx again).
+          return (c === MINUS || c === PERIOD || (DIGIT_0 <= c && c <= DIGIT_9));
       }
       var canRepeat;
       activeCmd = pathStr[0];

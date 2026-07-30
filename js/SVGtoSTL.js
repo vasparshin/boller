@@ -298,75 +298,247 @@ function determineWinding(points) {
     };
 }
 
-// Create a shape directly from SVG path data
+// Ray-casting point-in-polygon test. Used to determine actual geometric
+// nesting between sub-paths instead of assuming "first sub-path = outer,
+// everything else = hole" (see processPathToShape for why that assumption
+// is wrong and was the root cause of corrupted/self-intersecting shapes).
+function pointInPolygon(point, polygonPoints) {
+    let inside = false;
+    for (let i = 0, j = polygonPoints.length - 1; i < polygonPoints.length; j = i++) {
+        const xi = polygonPoints[i].x, yi = polygonPoints[i].y;
+        const xj = polygonPoints[j].x, yj = polygonPoints[j].y;
+        const intersect = ((yi > point.y) !== (yj > point.y)) &&
+            (point.x < (xj - xi) * (point.y - yi) / (yj - yi + Number.EPSILON) + xi);
+        if (intersect) inside = !inside;
+    }
+    return inside;
+}
+
+// Create one or more shapes directly from SVG path data.
+//
+// A single SVG <path> "d" attribute can contain multiple sub-paths
+// (multiple M...Z segments). These sub-paths can mean two very different
+// things:
+//   1. A hole nested inside an outer contour (e.g. the counter of a "B" or "O")
+//   2. A completely separate, disjoint outer contour that happens to share
+//      the same <path> element (very common when a logo/wordmark with
+//      several letters or disconnected graphic elements is exported as one
+//      compound path by Illustrator/Inkscape/CorelDRAW "merge/unite" export).
+//
+// The previous implementation assumed case (1) was always true: it took the
+// FIRST sub-path as "the" outer shape and forced EVERY other sub-path into
+// its holes list, with no geometric check. When case (2) actually applied,
+// this produced a Shape whose "hole" lay partially or fully outside (or
+// beside) the outer boundary -- a self-intersecting/degenerate 2D shape.
+// THREE.ExtrudeGeometry's triangulator (earcut) then produced garbage
+// triangles / missing faces for that region, which downstream PyMeshFix
+// repair and the boolean subtraction could not reliably recover -- this is
+// the corrupted/missing-geometry bug reported by Vas, and explains why it
+// was logo-dependent: it only manifests when a compound path has genuinely
+// disjoint (non-nested) sub-paths, not just letters-with-counters.
+//
+// Fix: classify every sub-path by actual point-in-polygon containment using
+// the standard even-odd nesting rule (a point contained by an EVEN number of
+// other sub-paths is itself solid/outer; an ODD number means it's a hole of
+// its nearest/smallest enclosing sub-path). This yields correct results for
+// simple letters-with-holes AND for multi-glyph/disjoint compound paths.
+//
+// Returns an ARRAY of THREE.Shape objects (each with its own correctly
+// nested holes) instead of a single shape, since one <path> element can now
+// legitimately produce multiple independent solid shapes/meshes.
 function processPathToShape(pathString, precision) {
     const pathPreview = pathString.substring(0, 50) + (pathString.length > 50 ? "..." : "");
-    log.debugGroup(`Processing SVG path to shape`, [`Path: ${pathPreview}`, `Precision: ${precision}`]);
-    
-    // Check if this might be a special letter with holes that doesn't appear to have subpaths
-    const specialLetterCheck = diagnostics.isSpecialLetter(pathString);
-    if (specialLetterCheck.isSpecial && !pathMightHaveHoles(pathString)) {
-        log.info(`Potential special letter detected: ${specialLetterCheck.letter}, using nested contours logic`);
+    log.debugGroup(`Processing SVG path to shape(s)`, [`Path: ${pathPreview}`, `Precision: ${precision}`]);
+
+    const subpaths = extractSubPaths(pathString);
+    const subpathStrings = subpaths.length > 0 ? subpaths : [pathString];
+
+    if (subpathStrings.length === 1) {
+        const shape = createShapeFromSVGPath(subpathStrings[0], precision);
+        if (!shape) return [];
+        diagnostics.addShape({ pointCount: shape.points.length, holeCount: 0, area: shape.area || 0 });
+        return [shape];
     }
-    
-    // If this might have holes or is a special letter
-    if (pathMightHaveHoles(pathString) || specialLetterCheck.isSpecial) {
-        log.debug("Path might have holes, extracting sub-paths");
-        
-        const subpaths = extractSubPaths(pathString);
-        if (subpaths.length <= 1) {
-            log.debug("Only found one subpath, processing as simple shape");
-            return createShapeFromSVGPath(pathString, precision);
+
+    log.debug(`Found ${subpathStrings.length} sub-paths, determining nesting geometrically`);
+
+    // Build raw point sets (without the CCW/CW hole-convention reversal --
+    // that's applied later once we know which role each sub-path plays).
+    const polys = [];
+    for (let i = 0; i < subpathStrings.length; i++) {
+        try {
+            const pathData = d3.transformSVGPath(subpathStrings[i]);
+            if (!pathData) {
+                log.warn(`Sub-path ${i}: d3.transformSVGPath failed, skipping`);
+                continue;
+            }
+            let points;
+            if (precision > 100) {
+                points = pathData.getPoints(Math.ceil(precision / 8));
+            } else if (precision > 20) {
+                points = pathData.getPoints(Math.ceil(precision / 4));
+            } else {
+                points = pathData.getPoints(Math.max(5, Math.ceil(precision / 2)));
+            }
+            if (!points || points.length < 3) {
+                log.warn(`Sub-path ${i}: not enough points, skipping`);
+                continue;
+            }
+            const windingInfo = determineWinding(points);
+            polys.push({
+                index: i,
+                points,
+                area: windingInfo ? windingInfo.area : 0
+            });
+        } catch (e) {
+            log.warn(`Error sampling sub-path ${i}: ${e.message}`);
         }
-        
-        log.debug(`Found ${subpaths.length} sub-paths, processing as complex shape`);
-        
-        // Process the first path as the main shape
-        const mainShape = createShapeFromSVGPath(subpaths[0], precision);
-        if (!mainShape) {
-            log.warn("Failed to create main shape from first subpath");
-            return null;
-        }
-        
-        // Process the remaining paths as potential holes
-        for (let i = 1; i < subpaths.length; i++) {
-            try {
-                const holePath = subpaths[i];
-                // Create a shape from the hole path
-                const holeShape = createShapeFromSVGPath(holePath, precision, true);
-                
-                if (holeShape && holeShape.points && holeShape.points.length >= 3) {
-                    // Create a hole path from the shape points
-                    const hole = new THREE.Path();
-                    hole.moveTo(holeShape.points[0].x, holeShape.points[0].y);
-                    
-                    for (let j = 1; j < holeShape.points.length; j++) {
-                        hole.lineTo(holeShape.points[j].x, holeShape.points[j].y);
-                    }
-                    
-                    hole.closePath();
-                    mainShape.holes.push(hole);
-                    log.debug(`Added hole ${i} with ${holeShape.points.length} points`);
-                } else {
-                    log.warn(`Failed to create hole from subpath ${i}`);
-                }
-            } catch (e) {
-                log.warn(`Error processing hole subpath ${i}: ${e.message}`);
+    }
+
+    if (polys.length === 0) {
+        log.warn("No valid sub-paths could be sampled");
+        return [];
+    }
+    if (polys.length === 1) {
+        return buildShapesFromClassifiedPolys(polys, [-1]);
+    }
+
+    // Classify each sub-path by even-odd containment against all others.
+    const order = polys.map((_, i) => i).sort((a, b) => polys[b].area - polys[a].area);
+    const parent = new Array(polys.length).fill(-1); // index into `polys` of the immediate enclosing (solid) poly, -1 = top-level
+
+    for (const idx of order) {
+        const testPoints = interiorTestPoints(polys[idx].points);
+        const containers = [];
+        for (const otherIdx of order) {
+            if (otherIdx === idx) continue;
+            // Majority vote across several interior-biased sample points rather
+            // than a single centroid: a single test point is unreliable for
+            // concave/badge-style contours (confirmed in testing against a real
+            // multi-glyph squash club logo, where a plain centroid produced
+            // inconsistent containment results for every sub-path). Voting
+            // across several boundary-derived points nudged toward the
+            // sub-path's own centroid is robust even when the raw centroid
+            // itself would land outside the shape.
+            let votes = 0;
+            for (const tp of testPoints) {
+                if (pointInPolygon(tp, polys[otherIdx].points)) votes++;
+            }
+            if (votes > testPoints.length / 2) {
+                containers.push(otherIdx);
             }
         }
-        
-        // Store diagnostic info for the shape with holes
-        diagnostics.addShape({
-            pointCount: mainShape.points.length,
-            holeCount: mainShape.holes.length,
-            area: mainShape.area || 0
-        });
-        
-        return mainShape;
-    } else {
-        // Simple shape with no holes
-        return createShapeFromSVGPath(pathString, precision);
+        if (containers.length % 2 === 0) {
+            // Even containment count => this sub-path is itself solid material
+            parent[idx] = -1;
+        } else {
+            // Odd => it's a hole; attach to the smallest (nearest) enclosing container
+            containers.sort((a, b) => polys[a].area - polys[b].area);
+            parent[idx] = containers[0];
+        }
     }
+
+    return buildShapesFromClassifiedPolys(polys, parent);
+}
+
+// Produce several points that are very likely interior to the given polygon,
+// even when the polygon is concave and its raw centroid would land outside
+// it (e.g. crescent/badge shapes). Technique: take a handful of vertices
+// spread evenly around the boundary and nudge each most of the way toward
+// the polygon's own centroid. A boundary point nudged strongly toward the
+// shape's own centroid lands inside the shape for the vast majority of
+// real-world (non-degenerate) glyph/logo contours, and sampling several such
+// points + majority-voting the containment result (see caller) protects
+// against the rare point that still lands outside.
+function interiorTestPoints(points) {
+    let cx = 0, cy = 0;
+    for (const p of points) { cx += p.x; cy += p.y; }
+    cx /= points.length;
+    cy /= points.length;
+
+    const sampleCount = Math.min(7, points.length);
+    const step = Math.floor(points.length / sampleCount) || 1;
+    const result = [];
+    for (let i = 0; i < points.length && result.length < sampleCount; i += step) {
+        const p = points[i];
+        result.push({ x: p.x * 0.1 + cx * 0.9, y: p.y * 0.1 + cy * 0.9 });
+    }
+    if (result.length === 0) result.push({ x: cx, y: cy });
+    return result;
+}
+
+// Given sampled+classified polygons, build the final array of THREE.Shape
+// objects with correctly nested holes and correct CCW(outer)/CW(hole) winding.
+function buildShapesFromClassifiedPolys(polys, parent) {
+    const shapesByPolyIndex = new Map();
+    const results = [];
+
+    // First pass: create the outer (top-level, parent === -1) shapes
+    polys.forEach((poly, i) => {
+        if (parent[i] !== -1) return;
+        let points = poly.points;
+        const windingInfo = determineWinding(points);
+        if (windingInfo && windingInfo.isClockwise) {
+            points = points.slice().reverse(); // outers must be CCW
+        }
+        const shape = new THREE.Shape();
+        shape.points = points;
+        shape.area = poly.area;
+        shape.moveTo(points[0].x, points[0].y);
+        for (let j = 1; j < points.length; j++) shape.lineTo(points[j].x, points[j].y);
+        shape.closePath();
+        shapesByPolyIndex.set(i, shape);
+        results.push(shape);
+        diagnostics.addPath({ pointCount: points.length, holeCount: 0, windingInfo });
+    });
+
+    // Second pass: attach holes to their parent shape
+    polys.forEach((poly, i) => {
+        if (parent[i] === -1) return;
+        const parentShape = shapesByPolyIndex.get(parent[i]);
+        if (!parentShape) {
+            log.warn(`Sub-path ${poly.index}: parent poly not resolved to a shape, dropping as hole`);
+            return;
+        }
+        let points = poly.points;
+        const windingInfo = determineWinding(points);
+        if (windingInfo && !windingInfo.isClockwise) {
+            points = points.slice().reverse(); // holes must be CW
+        }
+        if (points.length < 3) return;
+        const hole = new THREE.Path();
+        hole.moveTo(points[0].x, points[0].y);
+        for (let j = 1; j < points.length; j++) hole.lineTo(points[j].x, points[j].y);
+        hole.closePath();
+        parentShape.holes.push(hole);
+        log.debug(`Attached sub-path ${poly.index} as hole (${points.length} points)`);
+    });
+
+    results.forEach(shape => {
+        diagnostics.addShape({
+            pointCount: shape.points.length,
+            holeCount: shape.holes.length,
+            area: shape.area || 0
+        });
+    });
+
+    if (results.length === 0) {
+        log.warn("No top-level (solid) sub-paths found -- all sub-paths were classified as holes, which shouldn't happen. Falling back to treating every sub-path as an independent solid shape.");
+        polys.forEach(poly => {
+            let points = poly.points;
+            const windingInfo = determineWinding(points);
+            if (windingInfo && windingInfo.isClockwise) points = points.slice().reverse();
+            const shape = new THREE.Shape();
+            shape.points = points;
+            shape.area = poly.area;
+            shape.moveTo(points[0].x, points[0].y);
+            for (let j = 1; j < points.length; j++) shape.lineTo(points[j].x, points[j].y);
+            shape.closePath();
+            results.push(shape);
+        });
+    }
+
+    return results;
 }
 
 // Create a shape from a SVG path
@@ -555,18 +727,23 @@ function renderObject(paths, scene, group, options) {
         // Process each path to create shapes and meshes
         console.groupCollapsed("[PROCESS] Processing SVG Paths");
         
-        // First, process all paths into shapes
+        // First, process all paths into shapes.
+        // NOTE: a single SVG <path> element can now yield MULTIPLE shapes
+        // (see processPathToShape) when it contains disjoint/non-nested
+        // sub-paths rather than a single outer contour with holes.
         const processedShapes = [];
-        
+
         for (let i = 0; i < paths.length; i++) {
-            const shape = processPathToShape(paths[i], precision);
-            if (shape) {
-                processedShapes.push({
-                    shape: shape,
-                    index: i,
-                    holes: shape.holes ? shape.holes.length : 0
-                });
-            }
+            const shapes = processPathToShape(paths[i], precision);
+            shapes.forEach((shape, shapeSubIndex) => {
+                if (shape) {
+                    processedShapes.push({
+                        shape: shape,
+                        index: shapes.length > 1 ? `${i}.${shapeSubIndex}` : i,
+                        holes: shape.holes ? shape.holes.length : 0
+                    });
+                }
+            });
         }
         
         console.groupEnd(); // End processing group
