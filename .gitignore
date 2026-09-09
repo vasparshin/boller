@@ -9,4 +9,4 @@ three-bvh-csg/
 three-mesh-bvh/
 models/old/
 *.log
-.vscode/
+.vscode/.playwright-mcp/
